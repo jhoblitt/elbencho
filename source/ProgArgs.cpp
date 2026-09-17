@@ -755,6 +755,13 @@ void ProgArgs::defineAllowedArgs()
 			"effective in read phase and in combination with \"-" ARG_NUMDIRS_SHORT "\" & \"-"
 			ARG_NUMFILES_SHORT "\". Read limit for all threads is defined by \"--"
 			ARG_RANDOMAMOUNT_LONG "\".")
+/*s3r*/	(ARG_S3REQTIMEOUT_LONG, bpo::value(&this->s3RequestTimeoutMs),
+			"Timeout in milliseconds for a single S3 request. The request fails if no data was "
+			"transferred for this long, rounded down to full seconds. Minimum: 1000; Maximum: "
+			"86400000. The HTTP client checks the transfer speed over a window of a few seconds, "
+			"so a stalled request is reported a few seconds after this time. (Default: 300000) "
+			"[With feature " FEATURE_NAME_S3_AWSCRT " this is only a coarse monitoring interval "
+			"with a minimum of 3 seconds.]")
 /*s3o*/	(ARG_S3SSE_LONG, bpo::bool_switch(&this->useS3SSE),
             "Server-side encryption of S3 objects using SSE-S3. (EXPERIMENTAL)")
 /*s3s*/	(ARG_S3SSECKEY_LONG, bpo::value(&this->s3SSECKey),
@@ -1022,6 +1029,7 @@ void ProgArgs::defineDefaults()
     this->s3NoCompression = false;
     this->s3NoMpuCompletion = false;
     this->s3IgnoreMultipartUpload404 = false;
+    this->s3RequestTimeoutMs = 300000;
     this->s3SessionToken = "";
     this->s3SignPolicy = 0;
     this->s3ThroughputTargetGbps = 100;
@@ -1635,6 +1643,10 @@ void ProgArgs::checkArgs()
             customTree.filesShared is generated. */
         throw ProgException("S3 write/upload cannot be used with infinite loop for shared objects.");
     }
+
+    if( (s3RequestTimeoutMs < 1000) || (s3RequestTimeoutMs > 86400000) )
+        throw ProgException("Invalid value for --" ARG_S3REQTIMEOUT_LONG ": "
+            "Must be between 1000 and 86400000 milliseconds.");
 
     if(!ignoreS3PartNum && (benchMode == BenchMode_S3) && fileSize && blockSize &&
         runCreateFilesPhase && ( (fileSize / blockSizeMix.getMinSize() ) > 10000) )
@@ -4325,6 +4337,7 @@ void ProgArgs::setFromPropertyTreeForService(bpt::ptree& tree)
     s3NoMpuCompletion = tree.get<bool>(ARG_S3NOMPUCOMPLETION_LONG);
 	s3ObjectPrefix = tree.get<std::string>(ARG_S3OBJECTPREFIX_LONG);
 	s3Region = tree.get<std::string>(ARG_S3REGION_LONG);
+    s3RequestTimeoutMs = tree.get<unsigned>(ARG_S3REQTIMEOUT_LONG);
     s3SessionToken = tree.get<std::string>(ARG_S3SESSION_TOKEN_LONG);
 	s3SignPolicy = tree.get<unsigned short>(ARG_S3SIGNPAYLOAD_LONG);
     s3SSECKey = tree.get<std::string>(ARG_S3SSECKEY_LONG);
@@ -4510,6 +4523,7 @@ void ProgArgs::getAsPropertyTreeForService(bpt::ptree& outTree, size_t serviceRa
     outTree.put(ARG_S3OBJTAGVERIFY_LONG, doS3ObjectTagVerify);
 	outTree.put(ARG_S3RANDOBJ_LONG, useS3RandObjSelect);
 	outTree.put(ARG_S3REGION_LONG, s3Region);
+    outTree.put(ARG_S3REQTIMEOUT_LONG, s3RequestTimeoutMs);
     outTree.put(ARG_S3SESSION_TOKEN_LONG, s3SessionToken);
 	outTree.put(ARG_S3SIGNPAYLOAD_LONG, s3SignPolicy);
     outTree.put(ARG_S3SSE_LONG, useS3SSE);

@@ -196,7 +196,8 @@ std::shared_ptr<S3Client> S3Tk::initS3Client(const ProgArgs* progArgs,
         isInterruptionRequested); /* S3CrtClient uses this for SDK-level ops (e.g.
         CreateMultipartUpload); CRT-internal Put/Get retries are separate */
     config.connectTimeoutMs = 5000;
-    config.requestTimeoutMs = 300000;
+    config.requestTimeoutMs = progArgs->getS3RequestTimeoutMs(); /* curl: low speed abort time;
+        S3CrtClient: monitor interval */
     config.disableExpectHeader = true;
     config.enableTcpKeepAlive = true;
     config.requestCompressionConfig.requestMinCompressionSizeBytes = 1;

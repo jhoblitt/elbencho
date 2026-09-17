@@ -16,6 +16,7 @@
 * New option to specify a comma-separated weighted mix of block sizes, e.g. `-b 4k:3,64k:1` for 3 parts 4KiB and 1 part 64KiB (75%/25% mix), which is equivalent to using `-b 4k:75,64k:25`.
 * Added support for journaled data verification. User guide is available at [`docs/journaling.md`](docs/journaling.md).
 * Added new `elbencho-prof.sh` tool for profile-driven automatic file & object bandwidth, IOPS, latency tests. (See `tools/elbencho-prof/`)
+* New option `--s3reqtimeout` to set the timeout for a single S3 request in milliseconds. (Default: 300000, as before)
 
 ### General Changes
 * Dockerfile symlink in repo root dir now points to Ubuntu 26.04 Dockerfile instead of Ubuntu 24.04.

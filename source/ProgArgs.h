@@ -199,6 +199,7 @@ namespace bpt = boost::property_tree;
 #define ARG_S3OBJTAGVERIFY_LONG          "s3otagverify"
 #define ARG_S3RANDOBJ_LONG               "s3randobj"
 #define ARG_S3REGION_LONG                "s3region"
+#define ARG_S3REQTIMEOUT_LONG            "s3reqtimeout"
 #define ARG_S3SESSION_TOKEN_LONG         "s3sessiontoken"
 #define ARG_S3SIGNPAYLOAD_LONG           "s3sign"
 #define ARG_S3SSE_LONG                   "s3sse"
@@ -550,6 +551,7 @@ class ProgArgs
         bool s3NoMpuCompletion; // don't send finalizing multi-part upload completion message
         std::string s3ObjectPrefix; // object name/path prefix for s3 "directory mode"
         std::string s3Region; // s3 region
+        unsigned s3RequestTimeoutMs; // aws sdk request timeout in millisecs (low speed abort)
         std::string s3SessionToken; // s3 session token (same as secret token)
         unsigned short s3SignPolicy; /* Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy; note:
             "2=never" is ignored, because as of aws sdk cpp v1.11.486 signing is always done. */
@@ -855,6 +857,7 @@ class ProgArgs
         uint64_t getS3MultiDelObjNum() const { return runS3MultiDelObjNum; }
         const std::string& getS3ObjectPrefix() const { return s3ObjectPrefix; }
         std::string getS3Region() const { return s3Region; }
+        unsigned getS3RequestTimeoutMs() const { return s3RequestTimeoutMs; }
         std::string getS3SessionToken() const { return s3SessionToken; }
         unsigned short getS3SignPolicy() const { return s3SignPolicy; }
         std::string getS3SSECKey() const { return s3SSECKey; }
