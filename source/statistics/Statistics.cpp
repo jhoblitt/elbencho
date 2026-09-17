@@ -231,6 +231,8 @@ bool Statistics::generatePhaseResults(PhaseResults& phaseResults)
 		phaseResults.iopsLatHistoReadMix += worker->getIOPSLatencyHistogramReadMix();
 		phaseResults.entriesLatHisto += worker->getEntriesLatencyHistogram();
 		phaseResults.entriesLatHistoReadMix += worker->getEntriesLatencyHistogramReadMix();
+		phaseResults.errorCounts += worker->getErrorCounts();
+		phaseResults.stoneWallNumErrors += worker->getStoneWallNumErrors();
 
 	} // end of for loop
 
@@ -379,6 +381,8 @@ void Statistics::getBenchResultAsPropertyTreeForService(bpt::ptree& outTree)
 	LatencyHistogram iopsLatHistoReadMix; // sum of all histograms
 	LatencyHistogram entriesLatHisto; // sum of all histograms
 	LatencyHistogram entriesLatHistoReadMix; // sum of all histograms
+	ErrorCounts errorCounts; // sum of all workers
+	uint64_t stoneWallNumErrors = 0; // sum of all workers' errors when stonewall was hit
 
 	getLiveOps(liveOps, liveOpsReadMix, liveLatency);
 
@@ -418,6 +422,8 @@ void Statistics::getBenchResultAsPropertyTreeForService(bpt::ptree& outTree)
 
 		iopsLatHisto += worker->getIOPSLatencyHistogram();
 		entriesLatHisto += worker->getEntriesLatencyHistogram();
+		errorCounts += worker->getErrorCounts();
+		stoneWallNumErrors += worker->getStoneWallNumErrors();
 
 		if(progArgs.hasRWMixReadCounters(workersSharedData.currentBenchPhase) )
 		{
@@ -430,6 +436,8 @@ void Statistics::getBenchResultAsPropertyTreeForService(bpt::ptree& outTree)
 
 	iopsLatHisto.getAsPropertyTreeForService(outTree, XFER_STATS_LAT_PREFIX_IOPS);
 	entriesLatHisto.getAsPropertyTreeForService(outTree, XFER_STATS_LAT_PREFIX_ENTRIES);
+	errorCounts.getAsPropertyTreeForService(outTree);
+	outTree.put(XFER_STATS_ERRCOUNT_STONEWALL, stoneWallNumErrors);
 
 	if(progArgs.hasRWMixReadCounters(workersSharedData.currentBenchPhase) )
 	{

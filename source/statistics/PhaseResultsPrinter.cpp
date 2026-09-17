@@ -652,6 +652,42 @@ void PhaseResultsPrinter::printPhaseResultsToStream(const PhaseResults& phaseRes
 	printPhaseResultsLatencyToStream(phaseResults.iopsLatHistoReadMix,
 		"IO " + terms.secondaryShort, &Worker::getIOPSLatencyHistogramReadMix, outStream);
 
+	// failed operations per error kind (e.g. ignored via "--s3ignoreerrors")
+	if(phaseResults.errorCounts.getNumErrorsTotal() )
+	{
+		// individual results header (note: keep format in sync with general table format string)
+		outStream << boost::format(phaseResultsLeftFormatStr)
+			% ""
+			% "Errors"
+			% ":";
+
+		outStream << "[ " <<
+			"total=" << phaseResults.errorCounts.getNumErrorsTotal() << " " <<
+			phaseResults.errorCounts.getKindsStr(" ", "=") <<
+			" ]" << std::endl;
+
+		// per-service error counts (if this was a distributed run)
+		if(!progArgs.getHostsVec().empty() )
+		{
+			outStream << boost::format(phaseResultsLeftFormatStr)
+				% ""
+				% "Svc errors"
+				% ":";
+
+			outStream << "[ ";
+
+			for(Worker* worker : workerVec)
+			{
+				RemoteWorker* remoteWorker = static_cast<RemoteWorker*>(worker);
+
+				outStream << remoteWorker->getHost() << "=" <<
+					worker->getErrorCounts().getNumErrorsTotal() << " ";
+			}
+
+			outStream << "]" << std::endl;
+		}
+	}
+
     // graph of the throughput over time (colored lines only on a console)
     if(graphSamples && progArgs.getShowGraph() )
     {
@@ -1125,6 +1161,10 @@ void PhaseResultsPrinter::printPhaseResultsToStringVec(const PhaseResults& phase
 	printPhaseResultsLatencyToStringVec(phaseResults.iopsLatHistoReadMix, "rwmix read IO",
 		outLabelsVec, outResultsVec);
 
+	// failed operations per error kind
+
+	printPhaseResultsErrorsToStringVec(phaseResults.errorCounts, outLabelsVec, outResultsVec);
+
 	// elbencho version
 
 	outLabelsVec.push_back("version");
@@ -1373,6 +1413,44 @@ void PhaseResultsPrinter::printPhaseResultsLatencyToStringVec(const LatencyHisto
 	outLabelsVec.push_back(latTypeStr + " lat us [max]");
 	outResultsVec.push_back(!latHisto.getNumStoredValues() ?
 		"" : std::to_string(latHisto.getMaxMicroSecLat() ) );
+}
+
+/**
+ * Print error counts to StringVec, e.g. for the StringVec to be turned into CSV.
+ *
+ * This can be called with empty errorCounts if caller is only interested in outLabelsVec. All
+ * values are empty if no error occurred in the phase.
+ */
+void PhaseResultsPrinter::printPhaseResultsErrorsToStringVec(const ErrorCounts& errorCounts,
+	StringVec& outLabelsVec, StringVec& outResultsVec)
+{
+	const uint64_t numErrorsTotal = errorCounts.getNumErrorsTotal();
+
+	outLabelsVec.push_back("errors total");
+	outResultsVec.push_back(!numErrorsTotal ? "" : std::to_string(numErrorsTotal) );
+
+	outLabelsVec.push_back("errors timeout");
+	outResultsVec.push_back(!numErrorsTotal ?
+		"" : std::to_string(errorCounts.getCount(ERRORCOUNTS_KIND_TIMEOUT) ) );
+
+	outLabelsVec.push_back("errors conn fail");
+	outResultsVec.push_back(!numErrorsTotal ?
+		"" : std::to_string(errorCounts.getCount(ERRORCOUNTS_KIND_CONNFAIL) ) );
+
+	outLabelsVec.push_back("errors conn reset");
+	outResultsVec.push_back(!numErrorsTotal ?
+		"" : std::to_string(errorCounts.getCount(ERRORCOUNTS_KIND_CONNRESET) ) );
+
+	outLabelsVec.push_back("errors http 4xx");
+	outResultsVec.push_back(!numErrorsTotal ?
+		"" : std::to_string(errorCounts.getCountHttpClass(4) ) );
+
+	outLabelsVec.push_back("errors http 5xx");
+	outResultsVec.push_back(!numErrorsTotal ?
+		"" : std::to_string(errorCounts.getCountHttpClass(5) ) );
+
+	outLabelsVec.push_back("errors by kind");
+	outResultsVec.push_back(!numErrorsTotal ? "" : errorCounts.getKindsStr(";", "=") );
 }
 
 void PhaseResultsPrinter::printPhaseResultsAsJSON(const PhaseResults& phaseResults)
@@ -1800,6 +1878,17 @@ void PhaseResultsPrinter::printPhaseResultsAsJSON(const PhaseResults& phaseResul
 
     if(lastDoneLatencySubtree.size() )
         lastDoneSubtree.put_child("latency", lastDoneLatencySubtree);
+
+    // failed operations of all workers when stonewall was hit (e.g. ignored via
+    // "--s3ignoreerrors")
+
+    if(phaseResults.stoneWallNumErrors)
+        firstDoneSubtree.put("errors.total", phaseResults.stoneWallNumErrors);
+
+    // failed operations per error kind (e.g. ignored via "--s3ignoreerrors")
+
+    if(phaseResults.errorCounts.getNumErrorsTotal() )
+        phaseResults.errorCounts.getAsPropertyTreeForJSONFile(lastDoneSubtree, "errors");
 
 
     // copy first level subtrees into main tree

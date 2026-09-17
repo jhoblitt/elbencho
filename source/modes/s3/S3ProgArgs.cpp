@@ -116,7 +116,11 @@ void S3ProgArgs::defineArgs(bpo::options_description& generic, bpo::options_desc
             "Reduce CPU overhead for uploads. Enables \"--" ARG_S3SIGNPAYLOAD_LONG "=2 (never)\", "
             "\"--" ARG_S3NOCOMPRESS_LONG "\".")
         (ARG_S3IGNOREERRORS_LONG, bpo::bool_switch(&this->ignoreS3Errors),
-            "Ignore any S3 upload/download errors. Useful for stress-testing.")
+            "Ignore S3 upload, download and stat errors and count them instead. Useful for "
+            "stress-testing. The counts are reported per phase in the results. Note that the AWS "
+            "SDK retries failed requests before " EXE_NAME " sees a failure, so set "
+            "AWS_RETRY_MODE=standard and AWS_MAX_ATTEMPTS=1 in the environment to count every "
+            "failed request. The exit code is 0 even if all requests failed.")
         (ARG_S3ACCESSKEY_LONG, bpo::value(&this->s3AccessKey),
             "S3 access key. (This can also be set via the " S3_ENV_ACCESS_KEY " env variable.)")
         (ARG_S3LISTOBJ_LONG, bpo::value(&this->runS3ListObjNum),

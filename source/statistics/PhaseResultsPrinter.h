@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "Common.h"
+#include "ErrorCounts.h"
 #include "statistics/LatencyHistogram.h"
 #include "statistics/LiveOps.h"
 #include "ProgArgs.h"
@@ -64,6 +65,9 @@ class PhaseResults
 		LatencyHistogram entriesLatHisto; // sum of all histograms
 		LatencyHistogram entriesLatHistoReadMix; // rwmix read sum of all histograms
 
+		ErrorCounts errorCounts; // sum of failed ops per error kind of all workers
+		uint64_t stoneWallNumErrors{0}; // failed ops of all workers when stonewall was hit
+
         // per-service min/avg/max by own completion time (netbench: the clients)
         ServiceMinMax svcIOPS;
         ServiceMinMax svcBytesPerSec;
@@ -114,6 +118,8 @@ class PhaseResultsPrinter
             std::ostream& outStream);
 		void printPhaseResultsLatencyToStringVec(const LatencyHistogram& latHisto,
 			std::string latTypeStr, StringVec& outLabelsVec, StringVec& outResultsVec);
+		void printPhaseResultsErrorsToStringVec(const ErrorCounts& errorCounts,
+			StringVec& outLabelsVec, StringVec& outResultsVec);
 		void printPhaseResultsAsJSON(const PhaseResults& phaseResults);
 };
 

@@ -8,6 +8,8 @@
 #include <map>
 #include <string>
 
+#include "ProgArgs.h"
+
 #define ERRORCOUNTS_KIND_HTTP_PREFIX	"http_" // followed by the decimal http status code
 #define ERRORCOUNTS_KIND_CURL_PREFIX	"curl_" // followed by an unmapped libcurl error code
 #define ERRORCOUNTS_KIND_TIMEOUT		"timeout" // no response before this side gave up
@@ -27,6 +29,14 @@ typedef std::map<std::string, uint64_t> ErrorKindCountMap;
  */
 class ErrorCounts
 {
+	public:
+		void getAsPropertyTreeForJSONFile(bpt::ptree& outTree, std::string subtreeKey) const;
+		void getAsPropertyTreeForService(bpt::ptree& outTree) const;
+		void setFromPropertyTreeForService(bpt::ptree& tree);
+		std::string getKindsStr(const std::string& kindSeparator,
+			const std::string& countSeparator) const;
+		uint64_t getCountHttpClass(unsigned firstDigit) const;
+
 	private:
 		ErrorKindCountMap counts; // number of failed operations per error kind
 
