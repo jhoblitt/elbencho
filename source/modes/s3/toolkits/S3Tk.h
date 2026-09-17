@@ -10,6 +10,7 @@
 #ifdef S3_SUPPORT
 	#include <aws/core/Aws.h>
     #include <aws/core/client/ClientConfiguration.h>
+    #include <aws/core/client/CoreErrors.h>
     #include <aws/core/utils/HashingUtils.h>
 	#include <aws/core/utils/memory/AWSMemory.h>
 	#include <aws/core/utils/memory/stl/AWSStreamFwd.h>
@@ -103,6 +104,7 @@ class S3Tk
         static void precreateMpuIDs(const ProgArgs* progArgs, std::shared_ptr<S3Client> s3Client,
             std::string bucketName, std::string objectPrefix, const PathList& pathList,
             StringVec& outMpuIDs);
+        static std::string errorToKindStr(const S3ErrorType& s3Error);
 
 #endif // S3_SUPPORT
 

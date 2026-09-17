@@ -88,6 +88,9 @@ class S3Mode
         void throwOnError(const Aws::Utils::Outcome<R, S3ErrorType>& outcome,
             const std::string& failMessage, const std::string& bucketName,
             const std::string& objectName="");
+
+        void countError(const S3ErrorType& s3Error);
+
         template <typename REQUESTTYPE>
         void addServerSideEncryption(REQUESTTYPE& request);
         template <typename REQUESTTYPE>
