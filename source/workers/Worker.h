@@ -4,7 +4,9 @@
 #ifndef WORKERS_WORKER_H_
 #define WORKERS_WORKER_H_
 
+#include <atomic>
 #include <iostream>
+#include "ErrorCounts.h"
 #include "LatencyHistogram.h"
 #include "LiveLatency.h"
 #include "LiveOps.h"
@@ -54,10 +56,13 @@ class Worker
 			assigned and thus finish immediately. these also don't trigger stonewall. */
 		LiveOps stoneWallOps; // done values when stonewall was hit
 		LiveOps stoneWallOpsReadMix; // done values when stonewall was hit
+		uint64_t stoneWallNumErrors{0}; // failed ops when stonewall was hit
+		std::atomic_uint64_t numErrorsLive{0}; // live total of errorCounts, read by the stonewall snapshot of other threads
 		LatencyHistogram iopsLatHisto; // ops latency histogram (valid only at phase end)
 		LatencyHistogram iopsLatHistoReadMix; // ops latency histogram (valid only at phase end)
 		LatencyHistogram entriesLatHisto; // entry latency histogram (valid only at phase end)
 		LatencyHistogram entriesLatHistoReadMix; // entry lat histogram (valid only at phase end)
+		ErrorCounts errorCounts; // failed ops per error kind (valid only at phase end)
 
 		virtual void run() = 0;
 		virtual void cleanup() {}; // cleanup immediately after run() (other workers still running)
@@ -85,6 +90,10 @@ class Worker
 			{ return entriesLatHisto; }
 		const LatencyHistogram& getEntriesLatencyHistogramReadMix() const
 			{ return entriesLatHistoReadMix; }
+		const ErrorCounts& getErrorCounts() const
+			{ return errorCounts; }
+		uint64_t getStoneWallNumErrors() const
+			{ return stoneWallNumErrors; }
 
 		virtual void resetStats()
 		{
@@ -99,10 +108,13 @@ class Worker
 			stoneWallTriggered = false;
 			stoneWallOps.setToZero();
 			stoneWallOpsReadMix.setToZero();
+			stoneWallNumErrors = 0;
+			numErrorsLive = 0;
 			iopsLatHisto.reset();
 			iopsLatHistoReadMix.reset();
 			entriesLatHisto.reset();
 			entriesLatHistoReadMix.reset();
+			errorCounts.reset();
 		}
 
 		/**
@@ -206,6 +218,7 @@ class Worker
 
 			atomicLiveOps.getAsLiveOps(stoneWallOps);
 			atomicLiveOpsReadMix.getAsLiveOps(stoneWallOpsReadMix);
+			stoneWallNumErrors = numErrorsLive;
 		}
 
 		bool getWorkerGotPhaseWork() const

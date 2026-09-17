@@ -330,6 +330,19 @@ class LocalWorker : public Worker
         template <typename R>
         void s3ModeThrowOnError(const Aws::Utils::Outcome<R, S3ErrorType>& outcome, const std::string& failMessage,
                                 const std::string& bucketName, const std::string& objectName="");
+
+        /**
+         * Account a failed S3 benchmark operation in the per-phase error counts. Interrupted
+         * requests are cancelled through the SDK and are not errors, so they are skipped.
+         */
+        void s3ModeCountError(const S3ErrorType& s3Error)
+        {
+            if( (int)s3Error.GetErrorType() == (int)Aws::Client::CoreErrors::USER_CANCELLED)
+                return;
+
+            errorCounts.addError(S3Tk::errorToKindStr(s3Error) );
+            numErrorsLive++;
+        }
 #endif // S3_SUPPORT
 
         template <typename REQUESTTYPE>

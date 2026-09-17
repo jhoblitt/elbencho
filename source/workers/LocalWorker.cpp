@@ -5374,6 +5374,8 @@ void LocalWorker::s3ModeThrowOnError(
 
     const auto s3Error = outcome.GetError();
 
+    s3ModeCountError(s3Error);
+
     std::stringstream errStr;
         errStr << failMessage << std::endl <<
         "Endpoint: " << s3EndpointStr << std::endl <<
@@ -5880,8 +5882,13 @@ void LocalWorker::s3ModeUploadObjectSinglePart(std::string bucketName, std::stri
 
 	checkInterruptionRequest(); // (placed here to avoid outcome check on interruption)
 
-	IF_UNLIKELY(!outcome.IsSuccess() && !ignoreS3Errors)
-        s3ModeThrowOnError(outcome, "Object upload failed.", bucketName, objectName);
+	IF_UNLIKELY(!outcome.IsSuccess() )
+	{
+		if(ignoreS3Errors)
+			s3ModeCountError(outcome.GetError() );
+		else
+			s3ModeThrowOnError(outcome, "Object upload failed.", bucketName, objectName);
+	}
 
 	if(blockSize)
 	{
@@ -5954,9 +5961,14 @@ void LocalWorker::s3ModeUploadObjectMultiPart(std::string bucketName, std::strin
 	OPLOG_POST_OP("S3CreateMultipartUpload", bucketName + "/" + objectName, 0, 0,
 		!createMultipartUploadOutcome.IsSuccess() );
 
-	IF_UNLIKELY(!createMultipartUploadOutcome.IsSuccess() && !ignoreS3Errors)
-		s3ModeThrowOnError(createMultipartUploadOutcome, "Multipart upload creation failed.",
-			bucketName, objectName);
+	IF_UNLIKELY(!createMultipartUploadOutcome.IsSuccess() )
+	{
+		if(ignoreS3Errors)
+			s3ModeCountError(createMultipartUploadOutcome.GetError() );
+		else
+			s3ModeThrowOnError(createMultipartUploadOutcome, "Multipart upload creation failed.",
+				bucketName, objectName);
+	}
 
 	Aws::String uploadID = createMultipartUploadOutcome.GetResult().GetUploadId();
 
@@ -6046,6 +6058,8 @@ void LocalWorker::s3ModeUploadObjectMultiPart(std::string bucketName, std::strin
 
 		IF_UNLIKELY(!uploadPartOutcome.IsSuccess() )
 		{
+			s3ModeCountError(uploadPartOutcome.GetError() );
+
 			s3ModeAbortMultipartUpload(bucketName, objectName, uploadID);
 
 			if (!ignoreS3Errors)
@@ -6133,6 +6147,8 @@ void LocalWorker::s3ModeUploadObjectMultiPart(std::string bucketName, std::strin
         if (!(progArgs->getS3IgnoreMultipartUpload404() &&
               s3Error.GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND))
         {
+            s3ModeCountError(s3Error);
+
             s3ModeAbortMultipartUpload(bucketName, objectName, uploadID);
 
             if (!ignoreS3Errors)
@@ -6196,9 +6212,14 @@ void LocalWorker::s3ModeUploadObjectMultiPartAsync(std::string bucketName, std::
     OPLOG_POST_OP("S3CreateMultipartUpload", bucketName + "/" + objectName, 0, 0,
         !createMultipartUploadOutcome.IsSuccess() );
 
-    IF_UNLIKELY(!createMultipartUploadOutcome.IsSuccess() && !ignoreS3Errors)
-        s3ModeThrowOnError(createMultipartUploadOutcome, "Multipart upload creation failed.",
-            bucketName, objectName);
+    IF_UNLIKELY(!createMultipartUploadOutcome.IsSuccess() )
+    {
+        if(ignoreS3Errors)
+            s3ModeCountError(createMultipartUploadOutcome.GetError() );
+        else
+            s3ModeThrowOnError(createMultipartUploadOutcome, "Multipart upload creation failed.",
+                bucketName, objectName);
+    }
 
     Aws::String uploadID = createMultipartUploadOutcome.GetResult().GetUploadId();
 
@@ -6326,6 +6347,8 @@ void LocalWorker::s3ModeUploadObjectMultiPartAsync(std::string bucketName, std::
 
                 IF_UNLIKELY(!uploadPartOutcome.IsSuccess() )
                 {
+                    s3ModeCountError(uploadPartOutcome.GetError() );
+
                     s3ModeAbortMultipartUpload(bucketName, objectName, uploadID);
 
                     if (!ignoreS3Errors)
@@ -6438,6 +6461,8 @@ void LocalWorker::s3ModeUploadObjectMultiPartAsync(std::string bucketName, std::
         if (!(progArgs->getS3IgnoreMultipartUpload404() &&
               s3Error.GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND))
         {
+            s3ModeCountError(s3Error);
+
             s3ModeAbortMultipartUpload(bucketName, objectName, uploadID);
 
             if (!ignoreS3Errors)
@@ -6561,6 +6586,8 @@ void LocalWorker::s3ModeUploadObjectMultiPartShared(std::string bucketName, std:
 
 			auto s3Error = uploadPartOutcome.GetError();
 
+			s3ModeCountError(s3Error);
+
             throw WorkerException(std::string("Shared multipart part upload failed. ") +
                 "Endpoint: " + s3EndpointStr + "; "
                 "Bucket: " + bucketName + "; "
@@ -6653,6 +6680,8 @@ void LocalWorker::s3ModeUploadObjectMultiPartShared(std::string bucketName, std:
         if (!(progArgs->getS3IgnoreMultipartUpload404() &&
               s3Error.GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND))
         {
+            s3ModeCountError(s3Error);
+
             s3ModeAbortMultipartUpload(bucketName, objectName, uploadID);
 
             throw WorkerException(std::string("Shared multipart upload completion failed. ") +
@@ -6820,6 +6849,8 @@ void LocalWorker::s3ModeUploadObjectMultiPartSharedAsync(std::string bucketName,
 
                     auto s3Error = uploadPartOutcome.GetError();
 
+                    s3ModeCountError(s3Error);
+
                     throw WorkerException(std::string("Shared multipart part upload failed. ") +
                         "Endpoint: " + s3EndpointStr + "; "
                         "Bucket: " + bucketName + "; "
@@ -6933,6 +6964,8 @@ void LocalWorker::s3ModeUploadObjectMultiPartSharedAsync(std::string bucketName,
         if (!(progArgs->getS3IgnoreMultipartUpload404() &&
               s3Error.GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND))
         {
+            s3ModeCountError(s3Error);
+
             s3ModeAbortMultipartUpload(bucketName, objectName, uploadID);
 
             throw WorkerException(std::string("Shared multipart upload completion failed. ") +
@@ -7258,8 +7291,13 @@ void LocalWorker::s3ModeDownloadObject(std::string bucketName, std::string objec
 
 		checkInterruptionRequest(); // (placed here to avoid outcome check on interruption)
 
-		IF_UNLIKELY(!outcome.IsSuccess() && !ignoreS3Errors)
-            s3ModeThrowOnError(outcome, "Object download failed.", bucketName, objectName);
+		IF_UNLIKELY(!outcome.IsSuccess() )
+		{
+			if(ignoreS3Errors)
+				s3ModeCountError(outcome.GetError() );
+			else
+				s3ModeThrowOnError(outcome, "Object download failed.", bucketName, objectName);
+		}
 
 		IF_UNLIKELY( ( (size_t)outcome.GetResult().GetContentLength() < blockSize) &&
             !ignoreS3Errors)
@@ -7447,8 +7485,13 @@ void LocalWorker::s3ModeDownloadObjectAsync(std::string bucketName, std::string 
 
                 checkInterruptionRequest(); // (placed here to avoid outcome check on interruption)
 
-                IF_UNLIKELY(!outcome.IsSuccess() && !ignoreS3Errors)
-                    s3ModeThrowOnError(outcome, "Object download failed.", bucketName, objectName);
+                IF_UNLIKELY(!outcome.IsSuccess() )
+                {
+                    if(ignoreS3Errors)
+                        s3ModeCountError(outcome.GetError() );
+                    else
+                        s3ModeThrowOnError(outcome, "Object download failed.", bucketName, objectName);
+                }
 
                 IF_UNLIKELY(
                     ( (size_t)outcome.GetResult().GetContentLength() <
@@ -7525,6 +7568,8 @@ void LocalWorker::s3ModeStatObject(std::string bucketName, std::string objectNam
 	throw WorkerException(std::string(__func__) + "called, but this was built without S3 support");
 #else
 
+    const bool ignoreS3Errors = progArgs->getIgnoreS3Errors();
+
 	S3::HeadObjectRequest request;
 	request.WithBucket(bucketName)
 		.WithKey(objectName);
@@ -7535,8 +7580,14 @@ void LocalWorker::s3ModeStatObject(std::string bucketName, std::string objectNam
 
     OPLOG_POST_OP("S3HeadObject", bucketName + "/" + objectName, 0, 0, !outcome.IsSuccess() );
 
-    s3ModeThrowOnError(outcome, "Object metadata retrieval via HeadObject failed.", bucketName,
-        objectName);
+    IF_UNLIKELY(!outcome.IsSuccess() )
+    {
+        if(ignoreS3Errors)
+            s3ModeCountError(outcome.GetError() );
+        else
+            s3ModeThrowOnError(outcome, "Object metadata retrieval via HeadObject failed.",
+                bucketName, objectName);
+    }
 
 #endif // S3_SUPPORT
 }
@@ -7564,11 +7615,13 @@ void LocalWorker::s3ModeDeleteObject(std::string bucketName, std::string objectN
 
     OPLOG_POST_OP("S3DeleteObject", bucketName + "/" + objectName, 0, 0, !outcome.IsSuccess() );
 
-	IF_UNLIKELY(!outcome.IsSuccess() &&
-		(!ignoreDelErrors ||
-			(outcome.GetError().GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND) ) )
+	IF_UNLIKELY(!outcome.IsSuccess() )
 	{
-        s3ModeThrowOnError(outcome, "Object deletion failed.", bucketName, objectName);
+		if(ignoreDelErrors &&
+			(outcome.GetError().GetResponseCode() != Aws::Http::HttpResponseCode::NOT_FOUND) )
+			s3ModeCountError(outcome.GetError() );
+		else
+			s3ModeThrowOnError(outcome, "Object deletion failed.", bucketName, objectName);
 	}
 
 #endif // S3_SUPPORT
@@ -7627,6 +7680,8 @@ void LocalWorker::s3ModeListObjects()
 			IF_UNLIKELY(!outcome.IsSuccess() )
 			{
 				auto s3Error = outcome.GetError();
+
+				s3ModeCountError(s3Error);
 
                 throw WorkerException(std::string("Object listing v2 failed. ") +
                     "Endpoint: " + s3EndpointStr + "; "
@@ -7772,6 +7827,8 @@ void LocalWorker::s3ModeListObjParallel()
 			IF_UNLIKELY(!outcome.IsSuccess() )
 			{
 				auto s3Error = outcome.GetError();
+
+				s3ModeCountError(s3Error);
 
                 throw WorkerException(std::string("Object listing v2 failed. ") +
                     "Endpoint: " + s3EndpointStr + "; "
@@ -7932,6 +7989,8 @@ void LocalWorker::s3ModeListAndMultiDeleteObjects()
 			{
 				auto s3Error = listOutcome.GetError();
 
+				s3ModeCountError(s3Error);
+
                 throw WorkerException(std::string("Object listing v2 failed. ") +
                     "Endpoint: " + s3EndpointStr + "; "
                     "Bucket: " + bucketVec[bucketIndex] + "; "
@@ -7970,23 +8029,26 @@ void LocalWorker::s3ModeListAndMultiDeleteObjects()
             OPLOG_POST_OP("S3DeleteObjects", bucketVec[bucketIndex] + "/" + objectPrefix, 0,
                 delOutcome.GetResult().GetDeleted().size(), !delOutcome.IsSuccess() );
 
-			IF_UNLIKELY(!delOutcome.IsSuccess() &&
-				(!ignoreDelErrors ||
-					(delOutcome.GetError().GetResponseCode() ==
-						Aws::Http::HttpResponseCode::NOT_FOUND) ) )
+			IF_UNLIKELY(!delOutcome.IsSuccess() )
 			{
 				auto s3Error = delOutcome.GetError();
 
-                throw WorkerException(std::string("DeleteObjects failed. ") +
-                    "Endpoint: " + s3EndpointStr + "; "
-                    "Bucket: " + bucketVec[bucketIndex] + "; "
-                    "NumObjectsPerRequest: " + std::to_string(numObjectsPerRequest) + "; "
-                    "Exception: " + s3Error.GetExceptionName() + "; " +
-                    "Message: " + s3Error.GetMessage() + "; " +
-                    "HTTP Error Code: " + std::to_string( (int)s3Error.GetResponseCode() ) + " (" +
-                        TranslatorTk::httpErrorCodeToHumanStr( (int)s3Error.GetResponseCode() ) +
-                        "); " +
-                    "Request ID: " + s3Error.GetRequestId() );
+				s3ModeCountError(s3Error);
+
+				if(!ignoreDelErrors ||
+					(s3Error.GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND) )
+				{
+					throw WorkerException(std::string("DeleteObjects failed. ") +
+						"Endpoint: " + s3EndpointStr + "; "
+						"Bucket: " + bucketVec[bucketIndex] + "; "
+						"NumObjectsPerRequest: " + std::to_string(numObjectsPerRequest) + "; "
+						"Exception: " + s3Error.GetExceptionName() + "; " +
+						"Message: " + s3Error.GetMessage() + "; " +
+						"HTTP Error Code: " + std::to_string( (int)s3Error.GetResponseCode() ) + " (" +
+							TranslatorTk::httpErrorCodeToHumanStr( (int)s3Error.GetResponseCode() ) +
+							"); " +
+						"Request ID: " + s3Error.GetRequestId() );
+				}
 			}
 
 			// calc entry operations latency
