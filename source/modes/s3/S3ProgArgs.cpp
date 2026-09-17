@@ -206,6 +206,13 @@ void S3ProgArgs::defineArgs(bpo::options_description& generic, bpo::options_desc
         (ARG_S3REGION_LONG, bpo::value(&this->s3Region),
             "S3 region. (This can also be set via the " S3_ENV_REGION " or "
             S3_ENV_REGION_DEFAULT " env variable.)")
+        (ARG_S3REQTIMEOUT_LONG, bpo::value(&this->s3RequestTimeoutMs),
+            "Timeout in milliseconds for a single S3 request. The request fails if no data was "
+            "transferred for this long, rounded down to full seconds. Minimum: 1000; Maximum: "
+            "86400000. The HTTP client checks the transfer speed over a window of a few seconds, "
+            "so a stalled request is reported a few seconds after this time. (Default: 300000) "
+            "[With feature " FEATURE_NAME_S3_AWSCRT " this is only a coarse monitoring interval "
+            "with a minimum of 3 seconds.]")
         (ARG_S3ACCESSSECRET_LONG, bpo::value(&this->s3AccessSecret),
             "S3 access secret. (This can also be set via the " S3_ENV_SECRET_KEY " env variable.)")
         (ARG_S3SESSION_TOKEN_LONG, bpo::value(&this->s3SessionToken),
@@ -275,6 +282,7 @@ void S3ProgArgs::defineDefaults()
     this->s3NoCompression = false;
     this->s3NoMpuCompletion = false;
     this->s3IgnoreMultipartUpload404 = false;
+    this->s3RequestTimeoutMs = 300000;
     this->s3SessionToken = "";
     this->s3SignPolicy = 0;
     this->s3ThroughputTargetGbps = 100;
@@ -475,6 +483,10 @@ void S3ProgArgs::checkArgs(const ProgArgs& progArgs)
                 std::to_string(progArgs.blockSizeMix.getMinSize() ) + "; "
             "Resulting number of parts: " +
             std::to_string(progArgs.fileSize / progArgs.blockSizeMix.getMinSize() ) );
+
+    if( (s3RequestTimeoutMs < 1000) || (s3RequestTimeoutMs > 86400000) )
+        throw ProgException("Invalid value for --" ARG_S3REQTIMEOUT_LONG ": "
+            "Must be between 1000 and 86400000 milliseconds.");
 
     S3Transport::checkArgs(progArgs);
 
@@ -933,6 +945,7 @@ void S3ProgArgs::setFromPropertyTree(const bpt::ptree& tree)
     s3NoMpuCompletion = tree.get<bool>(ARG_S3NOMPUCOMPLETION_LONG);
     s3ObjectPrefix = tree.get<std::string>(ARG_S3OBJECTPREFIX_LONG);
     s3Region = tree.get<std::string>(ARG_S3REGION_LONG);
+    s3RequestTimeoutMs = tree.get<unsigned>(ARG_S3REQTIMEOUT_LONG);
     s3SessionToken = tree.get<std::string>(ARG_S3SESSION_TOKEN_LONG);
     s3SignPolicy = tree.get<unsigned short>(ARG_S3SIGNPAYLOAD_LONG);
     s3SSECKey = tree.get<std::string>(ARG_S3SSECKEY_LONG);
@@ -994,6 +1007,7 @@ void S3ProgArgs::getAsPropertyTree(bpt::ptree& outTree) const
     outTree.put(ARG_S3OBJTAGVERIFY_LONG, doS3ObjectTagVerify);
     outTree.put(ARG_S3RANDOBJ_LONG, useS3RandObjSelect);
     outTree.put(ARG_S3REGION_LONG, s3Region);
+    outTree.put(ARG_S3REQTIMEOUT_LONG, s3RequestTimeoutMs);
     outTree.put(ARG_S3SESSION_TOKEN_LONG, s3SessionToken);
     outTree.put(ARG_S3SIGNPAYLOAD_LONG, s3SignPolicy);
     outTree.put(ARG_S3SSE_LONG, useS3SSE);

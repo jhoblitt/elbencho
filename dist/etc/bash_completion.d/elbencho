@@ -180,6 +180,7 @@ _elbencho_opts()
         --s3otagverify
         --s3randobj
         --s3region
+        --s3reqtimeout
         --s3secret
         --s3sessiontoken
         --s3sseckey
@@ -349,6 +350,8 @@ _elbencho()
         --s3objprefix)
         ;&
         --s3region)
+        ;&
+        --s3reqtimeout)
         ;&
         --s3secret)
         ;&
