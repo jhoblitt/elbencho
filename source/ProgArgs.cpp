@@ -55,7 +55,7 @@
 
 #define ENDL                        << std::endl << // just to make help text print lines shorter
 
-#define CSVFILE_EXPECTED_COMMAS     54 // to check if existing csv was written with other version
+#define CSVFILE_EXPECTED_COMMAS     58 // to check if existing csv was written with other version
 
 #define NUMAZONES_ALL_ARG           "all" // shortcut for user to select all numa zones
 #define CPUCORES_ALL_ARG            "all" // shortcut for user to select all cpu cores
