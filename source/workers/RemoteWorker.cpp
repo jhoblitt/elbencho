@@ -240,6 +240,8 @@ void RemoteWorker::finishPhase(bool allowExceptionThrow)
 
 		iopsLatHisto.setFromPropertyTreeForService(resultTree, XFER_STATS_LAT_PREFIX_IOPS);
 		entriesLatHisto.setFromPropertyTreeForService(resultTree, XFER_STATS_LAT_PREFIX_ENTRIES);
+		errorCounts.setFromPropertyTreeForService(resultTree);
+		stoneWallNumErrors = resultTree.get<uint64_t>(XFER_STATS_ERRCOUNT_STONEWALL, 0);
 
 		liveLatency.setToZero(); // this service is done, so no more latency
 

@@ -1762,6 +1762,8 @@ bool Statistics::generatePhaseResults(PhaseResults& phaseResults)
 		phaseResults.iopsLatHistoReadMix += worker->getIOPSLatencyHistogramReadMix();
 		phaseResults.entriesLatHisto += worker->getEntriesLatencyHistogram();
 		phaseResults.entriesLatHistoReadMix += worker->getEntriesLatencyHistogramReadMix();
+		phaseResults.errorCounts += worker->getErrorCounts();
+		phaseResults.stoneWallNumErrors += worker->getStoneWallNumErrors();
 
 	} // end of for loop
 
@@ -2192,6 +2194,42 @@ void Statistics::printPhaseResultsToStream(const PhaseResults& phaseResults,
 	printPhaseResultsLatencyToStream(phaseResults.iopsLatHistoReadMix,
 		"IO rd", outStream);
 
+	// failed operations per error kind (e.g. ignored via "--s3ignoreerrors")
+	if(phaseResults.errorCounts.getNumErrorsTotal() )
+	{
+		// individual results header (note: keep format in sync with general table format string)
+		outStream << boost::format(Statistics::phaseResultsLeftFormatStr)
+			% ""
+			% "Errors"
+			% ":";
+
+		outStream << "[ " <<
+			"total=" << phaseResults.errorCounts.getNumErrorsTotal() << " " <<
+			phaseResults.errorCounts.getKindsStr(" ", "=") <<
+			" ]" << std::endl;
+
+		// per-service error counts (if this was a distributed run)
+		if(!progArgs.getHostsVec().empty() )
+		{
+			outStream << boost::format(Statistics::phaseResultsLeftFormatStr)
+				% ""
+				% "Svc errors"
+				% ":";
+
+			outStream << "[ ";
+
+			for(Worker* worker : workerVec)
+			{
+				RemoteWorker* remoteWorker = static_cast<RemoteWorker*>(worker);
+
+				outStream << remoteWorker->getHost() << "=" <<
+					worker->getErrorCounts().getNumErrorsTotal() << " ";
+			}
+
+			outStream << "]" << std::endl;
+		}
+	}
+
 	// warn in case of invalid results
 	if( (phaseResults.firstFinishUSec == 0) && !progArgs.getIgnore0USecErrors() )
 	{
@@ -2372,6 +2410,10 @@ void Statistics::printPhaseResultsToStringVec(const PhaseResults& phaseResults,
 	printPhaseResultsLatencyToStringVec(phaseResults.iopsLatHistoReadMix, "rwmix read IO",
 		outLabelsVec, outResultsVec);
 
+	// failed operations per error kind
+
+	printPhaseResultsErrorsToStringVec(phaseResults.errorCounts, outLabelsVec, outResultsVec);
+
 	// elbencho version
 
 	outLabelsVec.push_back("version");
@@ -2525,6 +2567,44 @@ void Statistics::printPhaseResultsLatencyToStringVec(const LatencyHistogram& lat
 	outLabelsVec.push_back(latTypeStr + " lat us [max]");
 	outResultsVec.push_back(!latHisto.getNumStoredValues() ?
 		"" : std::to_string(latHisto.getMaxMicroSecLat() ) );
+}
+
+/**
+ * Print error counts to StringVec, e.g. for the StringVec to be turned into CSV.
+ *
+ * This can be called with empty errorCounts if caller is only interested in outLabelsVec. All
+ * values are empty if no error occurred in the phase.
+ */
+void Statistics::printPhaseResultsErrorsToStringVec(const ErrorCounts& errorCounts,
+	StringVec& outLabelsVec, StringVec& outResultsVec)
+{
+	const uint64_t numErrorsTotal = errorCounts.getNumErrorsTotal();
+
+	outLabelsVec.push_back("errors total");
+	outResultsVec.push_back(!numErrorsTotal ? "" : std::to_string(numErrorsTotal) );
+
+	outLabelsVec.push_back("errors timeout");
+	outResultsVec.push_back(!numErrorsTotal ?
+		"" : std::to_string(errorCounts.getCount(ERRORCOUNTS_KIND_TIMEOUT) ) );
+
+	outLabelsVec.push_back("errors conn fail");
+	outResultsVec.push_back(!numErrorsTotal ?
+		"" : std::to_string(errorCounts.getCount(ERRORCOUNTS_KIND_CONNFAIL) ) );
+
+	outLabelsVec.push_back("errors conn reset");
+	outResultsVec.push_back(!numErrorsTotal ?
+		"" : std::to_string(errorCounts.getCount(ERRORCOUNTS_KIND_CONNRESET) ) );
+
+	outLabelsVec.push_back("errors http 4xx");
+	outResultsVec.push_back(!numErrorsTotal ?
+		"" : std::to_string(errorCounts.getCountHttpClass(4) ) );
+
+	outLabelsVec.push_back("errors http 5xx");
+	outResultsVec.push_back(!numErrorsTotal ?
+		"" : std::to_string(errorCounts.getCountHttpClass(5) ) );
+
+	outLabelsVec.push_back("errors by kind");
+	outResultsVec.push_back(!numErrorsTotal ? "" : errorCounts.getKindsStr(";", "=") );
 }
 
 void Statistics::printPhaseResultsAsJSON(const PhaseResults& phaseResults)
@@ -2794,6 +2874,17 @@ void Statistics::printPhaseResultsAsJSON(const PhaseResults& phaseResults)
     if(lastDoneLatencySubtree.size() )
         lastDoneSubtree.put_child("latency", lastDoneLatencySubtree);
 
+    // failed operations of all workers when stonewall was hit (e.g. ignored via
+    // "--s3ignoreerrors")
+
+    if(phaseResults.stoneWallNumErrors)
+        firstDoneSubtree.put("errors.total", phaseResults.stoneWallNumErrors);
+
+    // failed operations per error kind (e.g. ignored via "--s3ignoreerrors")
+
+    if(phaseResults.errorCounts.getNumErrorsTotal() )
+        phaseResults.errorCounts.getAsPropertyTreeForJSONFile(lastDoneSubtree, "errors");
+
 
     // copy first level subtrees into main tree
 
@@ -2842,6 +2933,8 @@ void Statistics::getBenchResultAsPropertyTreeForService(bpt::ptree& outTree)
 	LatencyHistogram iopsLatHistoReadMix; // sum of all histograms
 	LatencyHistogram entriesLatHisto; // sum of all histograms
 	LatencyHistogram entriesLatHistoReadMix; // sum of all histograms
+	ErrorCounts errorCounts; // sum of all workers
+	uint64_t stoneWallNumErrors = 0; // sum of all workers' errors when stonewall was hit
 
 	getLiveOps(liveOps, liveOpsReadMix, liveLatency);
 
@@ -2881,6 +2974,8 @@ void Statistics::getBenchResultAsPropertyTreeForService(bpt::ptree& outTree)
 
 		iopsLatHisto += worker->getIOPSLatencyHistogram();
 		entriesLatHisto += worker->getEntriesLatencyHistogram();
+		errorCounts += worker->getErrorCounts();
+		stoneWallNumErrors += worker->getStoneWallNumErrors();
 
 		if( (workersSharedData.currentBenchPhase == BenchPhase_CREATEFILES) &&
 			(progArgs.getRWMixReadPercent() || progArgs.getNumRWMixReadThreads() ||
@@ -2895,6 +2990,8 @@ void Statistics::getBenchResultAsPropertyTreeForService(bpt::ptree& outTree)
 
 	iopsLatHisto.getAsPropertyTreeForService(outTree, XFER_STATS_LAT_PREFIX_IOPS);
 	entriesLatHisto.getAsPropertyTreeForService(outTree, XFER_STATS_LAT_PREFIX_ENTRIES);
+	errorCounts.getAsPropertyTreeForService(outTree);
+	outTree.put(XFER_STATS_ERRCOUNT_STONEWALL, stoneWallNumErrors);
 
 	if( (workersSharedData.currentBenchPhase == BenchPhase_CREATEFILES) &&
 		(progArgs.getRWMixReadPercent() || progArgs.getNumRWMixReadThreads() ||

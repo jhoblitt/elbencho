@@ -15,6 +15,7 @@
 
 #include "CPUUtil.h"
 #include "Common.h"
+#include "ErrorCounts.h"
 #include "LiveLatency.h"
 #include "ProgArgs.h"
 #include "toolkits/TranslatorTk.h"
@@ -45,6 +46,9 @@ class PhaseResults
 		LatencyHistogram iopsLatHistoReadMix; // rwmix read sum of all histograms
 		LatencyHistogram entriesLatHisto; // sum of all histograms
 		LatencyHistogram entriesLatHistoReadMix; // rwmix read sum of all histograms
+
+		ErrorCounts errorCounts; // sum of failed ops per error kind of all workers
+		uint64_t stoneWallNumErrors; // failed ops of all workers when stonewall was hit
 };
 
 /**
@@ -154,6 +158,8 @@ class Statistics
 			std::string latTypeStr, std::ostream& outStream);
 		void printPhaseResultsLatencyToStringVec(const LatencyHistogram& latHisto,
 			std::string latTypeStr, StringVec& outLabelsVec, StringVec& outResultsVec);
+		void printPhaseResultsErrorsToStringVec(const ErrorCounts& errorCounts,
+			StringVec& outLabelsVec, StringVec& outResultsVec);
 		void printPhaseResultsAsJSON(const PhaseResults& phaseResults);
 
 		void printLiveCountdownLine(unsigned long long waittimeSec);

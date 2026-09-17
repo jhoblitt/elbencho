@@ -125,6 +125,8 @@ To generate charts from your result series, consider using elbencho's csv file o
 
 See the [CSV documentation](docs/csv-docs.md) for detailed descriptions of fields.
 
+Failed S3 requests are counted per phase; see the [S3 error counts guide](docs/s3-error-counts.md).
+
 ### Questions & Comments
 
 In case of questions, comments, if something is missing to make elbencho more useful or if you would just like to share your thoughts, feel free to contact me: sven.breuner[at]gmail.com

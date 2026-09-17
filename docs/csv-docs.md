@@ -29,7 +29,7 @@ As mentioned in the [main README file](README.md), elbencho presents two result 
   * `IOPS [first]` & `[last]` - number of IOPS for the first and last thread finished
   * `MiB/s [first]` & `[last]` - throughput in MiB/s for the first and last thread finished
   * `entries [first]` & `[last]` - total entries created by the first and last thread finished
-  * `IOs [first]` & `[last]` - total number of I/O operations (blocks read or written; for S3 the number of object requests, including failed ones when errors are ignored) by the first and last thread finished
+  * `IOs [first]` & `[last]` - total number of I/O operations (blocks read or written, or S3 object requests, including failed requests when errors are ignored; not incremented by HEAD, list, delete or multipart create/complete requests) by the first and last thread finished
   * `MiB [first]` & `[last]` - total MiB read/written by the first and last thread finished
   * `Ent lat us [min]` & `[avg]` & `[max]` - time in microseconds to complete an entry (file or directory)
   * `IO lat us [min]` & `[avg]` & `[max]` - time in microseconds to complete an IOP, that is: IO latency
@@ -42,5 +42,13 @@ As mentioned in the [main README file](README.md), elbencho presents two result 
   * `rwmix read MiB [first]` & `[last]`
   * `rwmix read Ent lat us [min]` & `[avg]` & `[max]`
   * `rwmix read IO lat us [min]` & `[avg]` & `[max]`
+* Error counts. These are only filled for phases in which S3 operations failed, e.g. when errors were ignored with `--s3ignoreerrors`, and are empty otherwise. Note that the AWS SDK retries failed requests before elbencho sees a failure; set `AWS_RETRY_MODE=standard` and `AWS_MAX_ATTEMPTS=1` in the environment of the elbencho process (or of each service instance) to count every failed request. See the [S3 error counts guide](s3-error-counts.md) for what is and is not counted, and for how to compute an error rate.
+  * `errors total` - number of failed S3 operations. Multipart-upload create and complete requests are counted here when they fail, but are not counted as IOs, so for multipart workloads `errors total` divided by `IOs [last]` slightly overstates the error rate.
+  * `errors timeout` - number of failed operations that got no response before elbencho gave up waiting (see `--s3reqtimeout`)
+  * `errors conn fail` - number of failed operations for which no connection to the endpoint could be established
+  * `errors conn reset` - number of failed operations for which the connection broke before or during the response
+  * `errors http 4xx` - number of failed operations with a 4xx HTTP status
+  * `errors http 5xx` - number of failed operations with a 5xx HTTP status
+  * `errors by kind` - all error kinds with their counts, separated by semicolons, e.g. `http_503=40;timeout=2`. Each HTTP status code is counted separately as `http_<code>`; `other` counts failures without an HTTP status that are neither a timeout, a connection failure nor a connection reset.
 * `version` - version of elbencho
 * `command` - elbencho command line used

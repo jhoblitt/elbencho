@@ -16,6 +16,11 @@
 * New option to specify a comma-separated weighted mix of block sizes, e.g. `-b 4k:3,64k:1` for 3 parts 4KiB and 1 part 64KiB (75%/25% mix), which is equivalent to using `-b 4k:75,64k:25`.
 * Added support for journaled data verification. User guide is available at [`docs/journaling.md`](docs/journaling.md).
 * Added new `elbencho-prof.sh` tool for profile-driven automatic file & object bandwidth, IOPS, latency tests. (See `tools/elbencho-prof/`)
+* Failed S3 operations are now counted per phase and reported in the phase results on the console and in the csv and json result files. Together with `--s3ignoreerrors` this shows how much of the offered load a server rejected, e.g. with 503 or 429 when it is saturated.
+  * Counts are broken down by kind (HTTP status code, timeout, connection failure/reset, unmapped libcurl error) in the console, csv and json results.
+  * Requires `--s3ignoreerrors` for the phase to complete instead of aborting on the first failure, and `AWS_RETRY_MODE=standard`/`AWS_MAX_ATTEMPTS=1` in the environment to see every failed request instead of only the ones the AWS SDK gives up retrying.
+  * `--s3ignoreerrors` now also covers `--stat` and no longer continues a multipart upload after a failure.
+  * User guide available at [`docs/s3-error-counts.md`](docs/s3-error-counts.md).
 * New option `--s3reqtimeout` to set the timeout for a single S3 request in milliseconds. (Default: 300000, as before)
 * The csv and json result files now contain the total number of I/O operations of a phase (`IOs` columns, `ios` keys next to `entries`), which so far was only shown on the console with a raised log level.
 

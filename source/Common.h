@@ -295,6 +295,11 @@ typedef std::vector<BenchPathInfo> BenchPathInfoVec;
 #define XFER_STATS_LATHISTOLIST_ITEM			"LatHistoList.item"
 #define XFER_STATS_LATHISTOLIST_ITEM_IDX		"i" // sparse encoding: flat bucket index
 #define XFER_STATS_LATHISTOLIST_ITEM_CNT		"c" // sparse encoding: bucket count
+#define XFER_STATS_ERRCOUNTLIST					"ErrCountList"
+#define XFER_STATS_ERRCOUNTLIST_ITEM			"ErrCountList.item"
+#define XFER_STATS_ERRCOUNTLIST_ITEM_KIND		"k" // sparse encoding: error kind string
+#define XFER_STATS_ERRCOUNTLIST_ITEM_CNT		"c" // sparse encoding: number of errors of kind
+#define XFER_STATS_ERRCOUNT_STONEWALL			"ErrCountStoneWall"
 #define XFER_STATS_CPUUTIL_STONEWALL			"CPUUtilStoneWall"
 #define XFER_STATS_CPUUTIL						"CPUUtil"
 

@@ -404,8 +404,14 @@ All options in alphabetical order:
                           verification or GPU data transfer.
   --s3fastput             Reduce CPU overhead for uploads. Enables "--s3sign=2 
                           (never)", "--s3nocompress".
-  --s3ignoreerrors        Ignore any S3 upload/download errors. Useful for 
-                          stress-testing.
+  --s3ignoreerrors        Ignore S3 upload, download and stat errors and count 
+                          them instead. Useful for stress-testing. The counts 
+                          are reported per phase in the results. Note that the 
+                          AWS SDK retries failed requests before elbencho sees 
+                          a failure, so set AWS_RETRY_MODE=standard and 
+                          AWS_MAX_ATTEMPTS=1 in the environment to count every 
+                          failed request. The exit code is 0 even if all 
+                          requests failed.
   --s3key arg             S3 access key. (This can also be set via the 
                           AWS_ACCESS_KEY_ID env variable.)
   --s3listobj arg         List objects. The given number is the maximum number 
@@ -484,6 +490,15 @@ All options in alphabetical order:
                           object for each S3 block read. Only effective in read
                           phase and in combination with "-n" & "-N". Read limit
                           for all threads is defined by "--randamount".
+  --s3reqtimeout arg      Timeout in milliseconds for a single S3 request. The 
+                          request fails if no data was transferred for this 
+                          long, rounded down to full seconds. Minimum: 1000; 
+                          Maximum: 86400000. The HTTP client checks the 
+                          transfer speed over a window of a few seconds, so a 
+                          stalled request is reported a few seconds after this 
+                          time. (Default: 300000) [With feature s3crt this is 
+                          only a coarse monitoring interval with a minimum of 3
+                          seconds.]
   --s3sse                 Server-side encryption of S3 objects using SSE-S3. 
                           (EXPERIMENTAL)
   --s3sseckey arg         Base64-encoded AES-256 encryption key for S3 SSE-C.
