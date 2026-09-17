@@ -46,11 +46,12 @@ Note that this server is licensed under the AGPL-3.0. It is only downloaded for
 running the tests and is neither linked against elbencho nor redistributed with
 it, so it does not affect elbencho's own licensing.
 
-Requirements: `prove`, `jq`, `timeout`, for the S3 tests the `aws` cli tool, and
-for the SPDK tests `python3` (spdk's `rpc.py`). The S3 server is downloaded
-automatically into the temporary dir when the S3 tests are enabled for the first
-time. The SPDK tests need no download: `nvmf_tgt` and `rpc.py` are built
-together with elbencho when `SPDK_SUPPORT=1` is used.
+Requirements: `prove`, `jq`, `timeout`, for the S3 tests the `aws` cli tool,
+and `python3` for the SPDK tests (spdk's `rpc.py`) and for the stall and short
+body servers of `tests_s3/error-counts-network.t`. The S3 server is downloaded automatically
+into the temporary dir when the S3 tests are enabled for the first time. The
+SPDK tests need no download: `nvmf_tgt` and `rpc.py` are built together with
+elbencho when `SPDK_SUPPORT=1` is used.
 
 Each running SPDK test occupies roughly one CPU core, because elbencho's SPDK
 I/O thread polls without sleeping. Prefer `-j 4` or lower together with `-p`.
@@ -224,6 +225,28 @@ Rules to keep tests independent, fast and safe to run in parallel:
 * The json result file (`--jsonfile`) is in json-lines format with one object
   per benchmark phase. Every scalar is written as a quoted string, and counters
   whose total is zero are omitted, which is why `json_value` falls back to `"0"`.
+* Failed S3 operations of a phase are reported below `last_done.errors` in the
+  json result (`total` and `by_kind`) and in the `errors ...` csv columns, but
+  only for phases in which operations failed. `json_error_count` and
+  `csv_value` read them and yield `0` respectively an empty string otherwise.
+  `last_done.ios` (csv: `IOs [last]`) is the number of attempted I/O
+  operations, failed ones included, i.e. the denominator of an error rate.
+  The `tests_s3/error-counts*.t` scripts provoke failures with a missing
+  bucket, wrong credentials, a closed port, a stall server and a server that
+  announces a body it never fully delivers (a connection reset). The latter two
+  need no S3 server, and they set `AWS_RETRY_MODE=standard AWS_MAX_ATTEMPTS=1`,
+  because the AWS SDK would otherwise retry every failed request ten times
+  with exponential backoff before elbencho sees the failure. They also cover a
+  partial failure (some objects were never written), a multipart upload whose
+  "CreateMultipartUpload" itself fails (so no part is ever uploaded), a
+  multipart upload that fails partway through against an embedded fake S3
+  server, both sync and async (`tests_s3/error-counts-multipart.t`), and
+  `--stat` (HeadObject) against a missing bucket, since `--s3ignoreerrors`
+  covers that request too. `tests_posix/csv-append.t` is the companion check
+  for the csv side of this: it writes two runs to the same `--csvfile` and
+  confirms the second one appends instead of aborting, which is what guards
+  `CSVFILE_EXPECTED_COMMAS` in `ProgArgs.cpp` against drifting out of sync with
+  the number of `errors ...` columns above.
 * Counters worth asserting are `entries` and `bytes` under `last_done`. There is
   no entry counter when the benchmark path is a file or block device, and no byte
   counter in dir or delete phases.
@@ -394,7 +417,11 @@ Rules to keep tests independent, fast and safe to run in parallel:
   pid, but it is written after the starting process has already returned, hence
   `wait_for_file_line`. `--quit` is reported as success even when nothing is
   listening on the given port, so only `wait_for_pid_gone` proves that a
-  daemonized service really ended.
+  daemonized service really ended. `start_service_pair` in `lib/testlib.sh`
+  starts two service instances on two consecutive free ports and sets `PORT1`,
+  `PORT2`, `HOSTS` and `SERVICE_PIDS` for a "host:[P1-P2]" port range, which is
+  what `tests_distributed/services-shared-dir.t` and
+  `tests_s3/error-counts-service.t` use to get a distributed run.
 * Neither `--cores` nor `--zones` appears in any result file. The effective
   affinity of the process is the only evidence that they took effect, which is
   what `cpus_allowed_list` reads. A NUMA zone binding cannot be verified this

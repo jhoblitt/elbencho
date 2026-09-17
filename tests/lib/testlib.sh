@@ -732,6 +732,72 @@ wait_for_file_line()
     return 1
 }
 
+########################### Elbencho service pairs ###########################
+
+# start_service_pair()
+#
+# Start two elbencho service instances on two consecutive free ports, so that
+# they can be given to the coordinator as one "host:[P1-P2]" port range. Sets
+# the globals PORT1, PORT2 (the two ports), HOSTS (the "localhost:[P1-P2]" host
+# list) and SERVICE_PIDS (the two service pids, space separated; also passed to
+# register_pid individually). Retries the whole sequence up to 5 times, because
+# a port can be taken between the free port check and the actual bind. Returns
+# non-zero if no working pair of services came up.
+start_service_pair()
+{
+    local tries=0
+    local pair
+    local port
+    local pid
+    local allup
+
+    while [ $tries -lt 5 ]; do
+        tries=$((tries+1))
+
+        pair=$(find_free_port_pair)
+        if [ -z "$pair" ]; then
+            return 1
+        fi
+
+        PORT1=${pair% *}
+        PORT2=${pair#* }
+        SERVICE_PIDS=""
+
+        for port in "$PORT1" "$PORT2"; do
+            "$ELBENCHO_TEST_BIN" --service --foreground --port "$port" \
+                > "$TEST_DIR/service-$port.log" 2>&1 &
+
+            pid=$!
+            SERVICE_PIDS="$SERVICE_PIDS $pid"
+            register_pid "$pid"
+
+            trace_cmd "service start on port $port (attempt $tries)" \
+                "$ELBENCHO_TEST_BIN" --service --foreground --port "$port"
+            trace_add_log "$TEST_DIR/service-$port.log"
+        done
+
+        allup=1
+        for port in "$PORT1" "$PORT2"; do
+            if ! wait_for_port 127.0.0.1 "$port" 10; then
+                allup=0
+            fi
+        done
+
+        if [ $allup -eq 1 ]; then
+            HOSTS="localhost:[$PORT1-$PORT2]"
+            return 0
+        fi
+
+        tap_diag "Services did not come up on ports $PORT1 and $PORT2, retrying..."
+        for pid in $SERVICE_PIDS; do
+            kill -KILL "$pid" >/dev/null 2>&1
+            wait "$pid" 2>/dev/null
+        done
+    done
+
+    return 1
+}
+
 ########################## Result file inspection ###########################
 #
 # The json result file is in json-lines format with one object per benchmark
@@ -740,7 +806,9 @@ wait_for_file_line()
 
 # json_value JSONFILE PHASE SECTION KEY
 # SECTION is "first_done" or "last_done". Missing keys yield "0", because
-# elbencho omits counters whose total is zero.
+# elbencho omits counters whose total is zero. Returns the first phase of that
+# name in the file, i.e. a repeated phase (e.g. two READ phases in one run) is
+# not reachable beyond its first occurrence this way.
 json_value()
 {
     jq -r --arg p "$2" --arg s "$3" --arg k "$4" \
@@ -797,6 +865,43 @@ json_has_key()
 {
     jq -r --arg p "$2" --arg s "$3" --arg k "$4" \
         'select(.phase_type == $p) | .[$s] | has($k)' "$1" 2>/dev/null | head -1
+}
+
+# json_error_count JSONFILE PHASE KIND [SECTION]
+# Number of failed operations of one error kind ("http_404", "timeout",
+# "conn_fail", "conn_reset", "other") or of all kinds ("total") from the
+# "errors" subtree, below SECTION ("first_done" or "last_done", defaulting to
+# "last_done"). "first_done" only ever has "total", never a "by_kind" breakdown.
+# Missing keys yield "0", because the subtree only exists for phases in which
+# operations failed. Returns the first phase of that name in the file.
+json_error_count()
+{
+    local section="${4:-last_done}"
+
+    jq -r --arg p "$2" --arg k "$3" --arg s "$section" \
+        'select(.phase_type == $p) |
+         (if $k == "total" then .[$s].errors.total
+          else .[$s].errors.by_kind[$k] end) // "0"' "$1" 2>/dev/null | head -1
+}
+
+# csv_value CSVFILE PHASE LABEL
+# Value of the column with the given header label in the row of the given
+# phase, i.e. the row whose "operation" column equals PHASE. Empty if the
+# column or the row does not exist. Returns the first phase of that name in the
+# file. The csv is never quoted, so a plain comma split is enough - except that
+# a value containing a comma (only possible in the "command" column) desyncs
+# the split for the rest of that row.
+csv_value()
+{
+    awk -F, -v phase="$2" -v label="$3" '
+        NR == 1 {
+            for(i = 1; i <= NF; i++) {
+                if($i == label) col = i
+                if($i == "operation") opcol = i
+            }
+            next
+        }
+        col && opcol && $opcol == phase { print $col; exit }' "$1" 2>/dev/null
 }
 
 # res_row_count RESFILE LABEL

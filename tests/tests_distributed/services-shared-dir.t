@@ -31,64 +31,6 @@ PORT2=""
 HOSTS=""
 SERVICE_PIDS=""
 
-# Start both services on two consecutive free ports, so that they can be given
-# to the coordinator as a port range. Retries the whole sequence, because a port
-# can be taken between the free port check and the actual bind.
-start_services()
-{
-    local tries=0
-    local pair
-    local port
-    local pid
-    local allup
-
-    while [ $tries -lt 5 ]; do
-        tries=$((tries+1))
-
-        pair=$(find_free_port_pair)
-        if [ -z "$pair" ]; then
-            return 1
-        fi
-
-        PORT1=${pair% *}
-        PORT2=${pair#* }
-        SERVICE_PIDS=""
-
-        for port in "$PORT1" "$PORT2"; do
-            "$ELBENCHO_TEST_BIN" --service --foreground --port "$port" \
-                > "$TEST_DIR/service-$port.log" 2>&1 &
-
-            pid=$!
-            SERVICE_PIDS="$SERVICE_PIDS $pid"
-            register_pid "$pid"
-
-            trace_cmd "service start on port $port (attempt $tries)" \
-                "$ELBENCHO_TEST_BIN" --service --foreground --port "$port"
-            trace_add_log "$TEST_DIR/service-$port.log"
-        done
-
-        allup=1
-        for port in "$PORT1" "$PORT2"; do
-            if ! wait_for_port 127.0.0.1 "$port" 10; then
-                allup=0
-            fi
-        done
-
-        if [ $allup -eq 1 ]; then
-            HOSTS="localhost:[$PORT1-$PORT2]"
-            return 0
-        fi
-
-        tap_diag "Services did not come up on ports $PORT1 and $PORT2, retrying..."
-        for pid in $SERVICE_PIDS; do
-            kill -KILL "$pid" >/dev/null 2>&1
-            wait "$pid" 2>/dev/null
-        done
-    done
-
-    return 1
-}
-
 test_init
 tap_plan 27
 
@@ -98,7 +40,7 @@ mkdir -p "$DATA_DIR"
 
 ################## Start both services ##################
 
-start_services
+start_service_pair
 if [ $? -ne 0 ]; then
     tap_bail "Unable to start two elbencho service instances on consecutive ports."
 fi
