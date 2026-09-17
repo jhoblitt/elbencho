@@ -17,6 +17,7 @@
 * Added support for journaled data verification. User guide is available at [`docs/journaling.md`](docs/journaling.md).
 * Added new `elbencho-prof.sh` tool for profile-driven automatic file & object bandwidth, IOPS, latency tests. (See `tools/elbencho-prof/`)
 * New option `--s3reqtimeout` to set the timeout for a single S3 request in milliseconds. (Default: 300000, as before)
+* The csv and json result files now contain the total number of I/O operations of a phase (`IOs` columns, `ios` keys next to `entries`), which so far was only shown on the console with a raised log level.
 
 ### General Changes
 * Dockerfile symlink in repo root dir now points to Ubuntu 26.04 Dockerfile instead of Ubuntu 24.04.

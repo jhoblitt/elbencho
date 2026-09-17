@@ -29,6 +29,7 @@ As mentioned in the [main README file](README.md), elbencho presents two result 
   * `IOPS [first]` & `[last]` - number of IOPS for the first and last thread finished
   * `MiB/s [first]` & `[last]` - throughput in MiB/s for the first and last thread finished
   * `entries [first]` & `[last]` - total entries created by the first and last thread finished
+  * `IOs [first]` & `[last]` - total number of I/O operations (blocks read or written; for S3 the number of object requests, including failed ones when errors are ignored) by the first and last thread finished
   * `MiB [first]` & `[last]` - total MiB read/written by the first and last thread finished
   * `Ent lat us [min]` & `[avg]` & `[max]` - time in microseconds to complete an entry (file or directory)
   * `IO lat us [min]` & `[avg]` & `[max]` - time in microseconds to complete an IOP, that is: IO latency
@@ -37,6 +38,7 @@ As mentioned in the [main README file](README.md), elbencho presents two result 
   * `rwmix read IOPS [first]` & `[last]`
   * `rwmix read MiB/s [first]` & `[last]`
   * `rwmix read entries [first]` & `[last]`
+  * `rwmix read IOs [first]` & `[last]`
   * `rwmix read MiB [first]` & `[last]`
   * `rwmix read Ent lat us [min]` & `[avg]` & `[max]`
   * `rwmix read IO lat us [min]` & `[avg]` & `[max]`

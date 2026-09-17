@@ -2278,6 +2278,16 @@ void Statistics::printPhaseResultsToStringVec(const PhaseResults& phaseResults,
 	outResultsVec.push_back(!phaseResults.opsTotal.numEntriesDone ?
 		"" : std::to_string(phaseResults.opsTotal.numEntriesDone) );
 
+	// IOs
+
+	outLabelsVec.push_back("IOs [first]");
+	outResultsVec.push_back(!phaseResults.opsTotal.numIOPSDone ?
+		"" : std::to_string(phaseResults.opsStoneWallTotal.numIOPSDone) );
+
+	outLabelsVec.push_back("IOs [last]");
+	outResultsVec.push_back(!phaseResults.opsTotal.numIOPSDone ?
+		"" : std::to_string(phaseResults.opsTotal.numIOPSDone) );
+
 	// MiB
 
 	outLabelsVec.push_back("MiB [first]");
@@ -2334,6 +2344,16 @@ void Statistics::printPhaseResultsToStringVec(const PhaseResults& phaseResults,
 	outLabelsVec.push_back("rwmix read entries [last]");
 	outResultsVec.push_back(!phaseResults.opsTotalReadMix.numEntriesDone ?
 		"" : std::to_string(phaseResults.opsTotalReadMix.numEntriesDone) );
+
+	// rwmix read IOs
+
+	outLabelsVec.push_back("rwmix read IOs [first]");
+	outResultsVec.push_back(!phaseResults.opsTotalReadMix.numIOPSDone ?
+		"" : std::to_string(phaseResults.opsStoneWallTotalReadMix.numIOPSDone) );
+
+	outLabelsVec.push_back("rwmix read IOs [last]");
+	outResultsVec.push_back(!phaseResults.opsTotalReadMix.numIOPSDone ?
+		"" : std::to_string(phaseResults.opsTotalReadMix.numIOPSDone) );
 
 	// rwmix read MiB
 
@@ -2663,6 +2683,11 @@ void Statistics::printPhaseResultsAsJSON(const PhaseResults& phaseResults)
 
         if(opsTotal.numEntriesDone)
             outTree.put("entries", inOpsTotal.numEntriesDone);
+
+        // IOs (number of blocks read/written or S3 requests)
+
+        if(opsTotal.numIOPSDone)
+            outTree.put("ios", inOpsTotal.numIOPSDone);
 
         // Bytes transferred
 

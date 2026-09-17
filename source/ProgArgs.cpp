@@ -58,7 +58,7 @@
 #define FILESHAREBLOCKFACTOR        32 // in custom tree mode, blockSize factor as of which to share
 #define FILESHAREBLOCKFACTOR_STR    STRINGIZE(FILESHAREBLOCKFACTOR)
 
-#define CSVFILE_EXPECTED_COMMAS     54 // to check if existing csv was written with other version
+#define CSVFILE_EXPECTED_COMMAS     58 // to check if existing csv was written with other version
 
 #define NETBENCH_PORT_OFFSET        1000 // offset from service port for netbench listen socket
 #define NETBENCH_PORT_OFFSET_STR    STRINGIZE(NETBENCH_PORT_OFFSET)
