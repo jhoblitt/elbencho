@@ -5964,7 +5964,10 @@ void LocalWorker::s3ModeUploadObjectMultiPart(std::string bucketName, std::strin
 	IF_UNLIKELY(!createMultipartUploadOutcome.IsSuccess() )
 	{
 		if(ignoreS3Errors)
+		{
 			s3ModeCountError(createMultipartUploadOutcome.GetError() );
+			return; // no upload id, so nothing to upload parts to or complete
+		}
 		else
 			s3ModeThrowOnError(createMultipartUploadOutcome, "Multipart upload creation failed.",
 				bucketName, objectName);
@@ -6056,8 +6059,12 @@ void LocalWorker::s3ModeUploadObjectMultiPart(std::string bucketName, std::strin
 		checkInterruptionRequest( // (placed here to avoid outcome check on interruption)
 			[&] { s3ModeAbortMultipartUpload(bucketName, objectName, uploadID); } );
 
+		bool partFailed = false;
+
 		IF_UNLIKELY(!uploadPartOutcome.IsSuccess() )
 		{
+			partFailed = true;
+
 			s3ModeCountError(uploadPartOutcome.GetError() );
 
 			s3ModeAbortMultipartUpload(bucketName, objectName, uploadID);
@@ -6079,17 +6086,19 @@ void LocalWorker::s3ModeUploadObjectMultiPart(std::string bucketName, std::strin
                     "Request ID: " + s3Error.GetRequestId() );
 			}
 		}
+		else
+		{
+			// mark part as completed
 
-		// mark part as completed
+			completedPart.SetPartNumber(currentPartNum);
+			auto partETag = uploadPartOutcome.GetResult().GetETag();
+			completedPart.SetETag(partETag);
 
-		completedPart.SetPartNumber(currentPartNum);
-		auto partETag = uploadPartOutcome.GetResult().GetETag();
-		completedPart.SetETag(partETag);
+			completedMultipartUpload.AddParts(completedPart);
 
-		completedMultipartUpload.AddParts(completedPart);
-
-		((*this).*funcPostReadCudaMemcpy)(ioBufVec[0], gpuIOBufVec[0], blockSize);
-		((*this).*funcPostReadBlockChecker)(ioBufVec[0], gpuIOBufVec[0], blockSize, currentOffset);
+			((*this).*funcPostReadCudaMemcpy)(ioBufVec[0], gpuIOBufVec[0], blockSize);
+			((*this).*funcPostReadBlockChecker)(ioBufVec[0], gpuIOBufVec[0], blockSize, currentOffset);
+		}
 
 		// calc io operation latency
 		std::chrono::steady_clock::time_point ioEndT = std::chrono::steady_clock::now();
@@ -6102,6 +6111,9 @@ void LocalWorker::s3ModeUploadObjectMultiPart(std::string bucketName, std::strin
 		numIOPSSubmitted++;
 		rwOffsetGen->addBytesSubmitted(blockSize);
 		atomicLiveOps.numIOPSDone++;
+
+		IF_UNLIKELY(partFailed)
+			return; // ignoreS3Errors is set here; upload aborted, so no more parts or completion
 	}
 
 	// S T E P 3: submit upload completion
@@ -6215,7 +6227,10 @@ void LocalWorker::s3ModeUploadObjectMultiPartAsync(std::string bucketName, std::
     IF_UNLIKELY(!createMultipartUploadOutcome.IsSuccess() )
     {
         if(ignoreS3Errors)
+        {
             s3ModeCountError(createMultipartUploadOutcome.GetError() );
+            return; // no upload id, so nothing to upload parts to or complete
+        }
         else
             s3ModeThrowOnError(createMultipartUploadOutcome, "Multipart upload creation failed.",
                 bucketName, objectName);
@@ -6233,6 +6248,7 @@ void LocalWorker::s3ModeUploadObjectMultiPartAsync(std::string bucketName, std::
         async callbacks on vector grow) */
 
     uint64_t currentPartNum = 0; // valid range is 1..10K
+    bool uploadFailed = false; // true after an ignored part upload failure; abort after batch drain
 
     /* NOTE on try-catch: before we can exit this function we need to wait for all async tasks to
         complete because they might still be accessing members of partCompletionsVec. */
@@ -6349,10 +6365,10 @@ void LocalWorker::s3ModeUploadObjectMultiPartAsync(std::string bucketName, std::
                 {
                     s3ModeCountError(uploadPartOutcome.GetError() );
 
-                    s3ModeAbortMultipartUpload(bucketName, objectName, uploadID);
-
-                    if (!ignoreS3Errors)
+                    if(!ignoreS3Errors)
                     {
+                        s3ModeAbortMultipartUpload(bucketName, objectName, uploadID);
+
                         auto s3Error = uploadPartOutcome.GetError();
 
                         throw WorkerException(std::string("Multipart part upload failed. ") +
@@ -6367,21 +6383,27 @@ void LocalWorker::s3ModeUploadObjectMultiPartAsync(std::string bucketName, std::
                                 "); "
                             "Request ID: " + s3Error.GetRequestId() );
                     }
+
+                    /* don't abort per part here; drain the rest of this batch's futures first
+                        and abort once after the batch completion loop below. */
+                    uploadFailed = true;
                 }
+                else
+                {
+                    // mark part as completed
 
-                // mark part as completed
+                    auto partETag = uploadPartOutcome.GetResult().GetETag();
+                    asyncPartContext.completedPart.SetETag(partETag);
 
-                auto partETag = uploadPartOutcome.GetResult().GetETag();
-                asyncPartContext.completedPart.SetETag(partETag);
+                    completedMultipartUpload.AddParts(asyncPartContext.completedPart);
 
-                completedMultipartUpload.AddParts(asyncPartContext.completedPart);
-
-                ((*this).*funcPostReadCudaMemcpy)(
-                    ioBufVec[currentIODepth], gpuIOBufVec[currentIODepth],
-                    asyncPartContext.blockSize);
-                ((*this).*funcPostReadBlockChecker)(
-                    ioBufVec[currentIODepth], gpuIOBufVec[currentIODepth],
-                    asyncPartContext.blockSize, asyncPartContext.currentOffset);
+                    ((*this).*funcPostReadCudaMemcpy)(
+                        ioBufVec[currentIODepth], gpuIOBufVec[currentIODepth],
+                        asyncPartContext.blockSize);
+                    ((*this).*funcPostReadBlockChecker)(
+                        ioBufVec[currentIODepth], gpuIOBufVec[currentIODepth],
+                        asyncPartContext.blockSize, asyncPartContext.currentOffset);
+                }
 
                 // calc io operation latency
                 std::chrono::steady_clock::time_point ioEndT = std::chrono::steady_clock::now();
@@ -6393,6 +6415,13 @@ void LocalWorker::s3ModeUploadObjectMultiPartAsync(std::string bucketName, std::
 
                 atomicLiveOps.numIOPSDone++;
             } // end of step 2.2: wait for part batch completion for-loop
+
+            if(uploadFailed)
+            {
+                // this batch's futures are drained; one abort covers every ignored failure in it
+                s3ModeAbortMultipartUpload(bucketName, objectName, uploadID);
+                return;
+            }
 
             checkInterruptionRequest([this, &bucketName, &objectName, &uploadID]
                 { s3ModeAbortMultipartUpload(bucketName, objectName, uploadID); } );
@@ -7299,8 +7328,8 @@ void LocalWorker::s3ModeDownloadObject(std::string bucketName, std::string objec
 				s3ModeThrowOnError(outcome, "Object download failed.", bucketName, objectName);
 		}
 
-		IF_UNLIKELY( ( (size_t)outcome.GetResult().GetContentLength() < blockSize) &&
-            !ignoreS3Errors)
+		IF_UNLIKELY(!ignoreS3Errors &&
+            ( (size_t)outcome.GetResult().GetContentLength() < blockSize) )
 		{
             throw WorkerException(std::string("Object too small. ") +
                 "Endpoint: " + s3EndpointStr + "; "
@@ -7311,8 +7340,11 @@ void LocalWorker::s3ModeDownloadObject(std::string bucketName, std::string objec
                 "Received length: " + std::to_string(outcome.GetResult().GetContentLength() ) );
 		}
 
-		((*this).*funcPostReadCudaMemcpy)(ioBuf, gpuIOBuf, blockSize);
-		((*this).*funcPostReadBlockChecker)(ioBuf, gpuIOBuf, blockSize, currentOffset);
+		IF_LIKELY(outcome.IsSuccess() ) // an ignored failure has no data to verify
+		{
+			((*this).*funcPostReadCudaMemcpy)(ioBuf, gpuIOBuf, blockSize);
+			((*this).*funcPostReadBlockChecker)(ioBuf, gpuIOBuf, blockSize, currentOffset);
+		}
 
 		// calc io operation latency
 		std::chrono::steady_clock::time_point ioEndT = std::chrono::steady_clock::now();
@@ -7494,9 +7526,9 @@ void LocalWorker::s3ModeDownloadObjectAsync(std::string bucketName, std::string 
                 }
 
                 IF_UNLIKELY(
+                    !ignoreS3Errors &&
                     ( (size_t)outcome.GetResult().GetContentLength() <
-                        asyncPartContext.blockSize) &&
-                    !ignoreS3Errors)
+                        asyncPartContext.blockSize) )
                 {
                     throw WorkerException(std::string("Object too small. ") +
                         "Endpoint: " + s3EndpointStr + "; "
@@ -7511,9 +7543,12 @@ void LocalWorker::s3ModeDownloadObjectAsync(std::string bucketName, std::string 
                 char* ioBuf = useS3FastRead ? NULL : ioBufVec[currentIODepth];
                 char* gpuIOBuf = useS3FastRead ? NULL : gpuIOBufVec[currentIODepth];
 
-                ((*this).*funcPostReadCudaMemcpy)(ioBuf, gpuIOBuf, asyncPartContext.blockSize);
-                ((*this).*funcPostReadBlockChecker)(ioBuf, gpuIOBuf, asyncPartContext.blockSize,
-                    asyncPartContext.currentOffset);
+                IF_LIKELY(outcome.IsSuccess() ) // an ignored failure has no data to verify
+                {
+                    ((*this).*funcPostReadCudaMemcpy)(ioBuf, gpuIOBuf, asyncPartContext.blockSize);
+                    ((*this).*funcPostReadBlockChecker)(ioBuf, gpuIOBuf, asyncPartContext.blockSize,
+                        asyncPartContext.currentOffset);
+                }
 
                 // calc io operation latency
                 std::chrono::steady_clock::time_point ioEndT = std::chrono::steady_clock::now();
