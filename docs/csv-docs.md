@@ -42,7 +42,7 @@ As mentioned in the [main README file](README.md), elbencho presents two result 
   * `rwmix read MiB [first]` & `[last]`
   * `rwmix read Ent lat us [min]` & `[avg]` & `[max]`
   * `rwmix read IO lat us [min]` & `[avg]` & `[max]`
-* Error counts. These are only filled for phases in which S3 operations failed, e.g. when errors were ignored with `--s3ignoreerrors`, and are empty otherwise. Note that the AWS SDK retries failed requests before elbencho sees a failure; set `AWS_RETRY_MODE=standard` and `AWS_MAX_ATTEMPTS=1` in the environment of the elbencho process (or of each service instance) to count every failed request. See the [S3 error counts guide](s3-error-counts.md) for what is and is not counted, and for how to compute an error rate.
+* Error counts. These are only filled for phases in which S3 operations failed, e.g. when errors were ignored with `--s3ignoreerrors`, and are empty otherwise. Attempts that the AWS SDK retries on its own are not counted here, but separately as retries below; set `AWS_RETRY_MODE=standard` and `AWS_MAX_ATTEMPTS=1` in the environment of the elbencho process (or of each service instance) to count every failed request as an error instead. See the [S3 error counts guide](s3-error-counts.md) for what is and is not counted, and for how to compute an error rate.
   * `errors total` - number of failed S3 operations. Multipart-upload create and complete requests are counted here when they fail, but are not counted as IOs, so for multipart workloads `errors total` divided by `IOs [last]` slightly overstates the error rate.
   * `errors timeout` - number of failed operations that got no response before elbencho gave up waiting (see `--s3reqtimeout`)
   * `errors conn fail` - number of failed operations for which no connection to the endpoint could be established
@@ -50,5 +50,9 @@ As mentioned in the [main README file](README.md), elbencho presents two result 
   * `errors http 4xx` - number of failed operations with a 4xx HTTP status
   * `errors http 5xx` - number of failed operations with a 5xx HTTP status
   * `errors by kind` - all error kinds with their counts, separated by semicolons, e.g. `http_503=40;timeout=2`. Each HTTP status code is counted separately as `http_<code>`; `other` counts failures without an HTTP status that are neither a timeout, a connection failure nor a connection reset.
+* Retry counts. These are only filled for phases in which the AWS SDK retried at least one request attempt, and are empty otherwise. See the "Retried attempts" section of the [S3 error counts guide](s3-error-counts.md) for what is and is not counted.
+  * `retries total` - number of request attempts that the AWS SDK retried
+  * `retries wait ms` - sum, across all attempts and all worker threads, of the backoff delay the AWS SDK waited before each retry; an upper bound on wait time, not the wall-clock time actually spent waiting, because worker threads retry concurrently, and it excludes a couple of other SDK-internal waits (see the [S3 error counts guide](s3-error-counts.md) for which)
+  * `retries by kind` - all error kinds of the retried attempts with their counts, separated by semicolons, using the same kinds as `errors by kind`
 * `version` - version of elbencho
 * `command` - elbencho command line used

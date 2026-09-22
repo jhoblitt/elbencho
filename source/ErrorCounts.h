@@ -6,9 +6,14 @@
 
 #include <cstdint>
 #include <map>
+#include <mutex>
 #include <string>
 
-#include "ProgArgs.h"
+#include <boost/property_tree/ptree.hpp>
+
+#include "Common.h"
+
+namespace bpt = boost::property_tree;
 
 #define ERRORCOUNTS_KIND_HTTP_PREFIX	"http_" // followed by the decimal http status code
 #define ERRORCOUNTS_KIND_CURL_PREFIX	"curl_" // followed by an unmapped libcurl error code
@@ -30,9 +35,12 @@ typedef std::map<std::string, uint64_t> ErrorKindCountMap;
 class ErrorCounts
 {
 	public:
-		void getAsPropertyTreeForJSONFile(bpt::ptree& outTree, std::string subtreeKey) const;
-		void getAsPropertyTreeForService(bpt::ptree& outTree) const;
-		void setFromPropertyTreeForService(bpt::ptree& tree);
+		void getAsPropertyTreeForJSONFile(bpt::ptree& outTree, std::string subtreeKey,
+			uint64_t waitMillis = 0, bool writeWait = false) const;
+		void getAsPropertyTreeForService(bpt::ptree& outTree,
+			std::string itemKey = XFER_STATS_ERRCOUNTLIST_ITEM) const;
+		void setFromPropertyTreeForService(bpt::ptree& tree,
+			std::string listKey = XFER_STATS_ERRCOUNTLIST);
 		std::string getKindsStr(const std::string& kindSeparator,
 			const std::string& countSeparator) const;
 		uint64_t getCountHttpClass(unsigned firstDigit) const;
@@ -76,6 +84,26 @@ class ErrorCounts
 
 			return *this;
 		}
+};
+
+/**
+ * Failed request attempts that the S3 client retried, per error kind, plus the sum of the backoff
+ * delays before those retries. Filled by the retry strategy from whichever thread executes the
+ * request, so all accesses are serialized by a mutex; read by the owner at phase end.
+ */
+class RetryCounts
+{
+	public:
+		void addRetry(const std::string& kind, uint64_t delayMillis);
+		ErrorCounts getCountsCopy() const;
+		uint64_t getWaitMillis() const;
+		void set(const ErrorCounts& newCounts, uint64_t newWaitMillis); // e.g. from a service
+		void reset();
+
+	private:
+		mutable std::mutex mutex;
+		ErrorCounts counts; // retried attempts per error kind
+		uint64_t waitMillis{0}; // sum of backoff delays before the retries
 };
 
 #endif /* ERRORCOUNTS_H_ */

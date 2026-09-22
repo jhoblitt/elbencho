@@ -538,7 +538,7 @@ void LocalWorker::initS3Client()
     else
     { // using per-worker s3 client instances
         s3Client = S3Tk::initS3Client(progArgs, workerRank, &isInterruptionRequested,
-            &s3EndpointStr);
+            &s3EndpointStr, &retryCounts);
     }
 
     useS3SSE = progArgs->getUseS3SSE();

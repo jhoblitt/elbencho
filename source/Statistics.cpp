@@ -1764,8 +1764,23 @@ bool Statistics::generatePhaseResults(PhaseResults& phaseResults)
 		phaseResults.entriesLatHistoReadMix += worker->getEntriesLatencyHistogramReadMix();
 		phaseResults.errorCounts += worker->getErrorCounts();
 		phaseResults.stoneWallNumErrors += worker->getStoneWallNumErrors();
+		phaseResults.retryCounts += worker->getRetryCounts().getCountsCopy();
+		phaseResults.retryWaitMillis += worker->getRetryCounts().getWaitMillis();
 
 	} // end of for loop
+
+#ifdef S3_SUPPORT
+	/* the shared client's ("--s3single") retry strategy counts into one process-wide instance
+	   instead of into a per-worker one, so it's not covered by the loop above and needs to be
+	   added once here. In service mode this is the master's own instance, which stays at zero
+	   because the master never issues S3 requests itself; the service hosts' shares already
+	   arrived summed into their RemoteWorker's retryCounts via the loop above. */
+	if(progArgs.getUseS3ClientSingleton() )
+	{
+		phaseResults.retryCounts += progArgs.getS3RetryCountsSingleton().getCountsCopy();
+		phaseResults.retryWaitMillis += progArgs.getS3RetryCountsSingleton().getWaitMillis();
+	}
+#endif // S3_SUPPORT
 
 	if(!firstAndLastFinishInitialized)
 	{
@@ -2230,6 +2245,22 @@ void Statistics::printPhaseResultsToStream(const PhaseResults& phaseResults,
 		}
 	}
 
+	// retried request attempts (e.g. because of S3 throttling) and their backoff wait
+	if(phaseResults.retryCounts.getNumErrorsTotal() )
+	{
+		// individual results header (note: keep format in sync with general table format string)
+		outStream << boost::format(Statistics::phaseResultsLeftFormatStr)
+			% ""
+			% "Retries"
+			% ":";
+
+		outStream << "[ " <<
+			"total=" << phaseResults.retryCounts.getNumErrorsTotal() << " " <<
+			"wait_ms=" << phaseResults.retryWaitMillis << " " <<
+			phaseResults.retryCounts.getKindsStr(" ", "=") <<
+			" ]" << std::endl;
+	}
+
 	// warn in case of invalid results
 	if( (phaseResults.firstFinishUSec == 0) && !progArgs.getIgnore0USecErrors() )
 	{
@@ -2412,7 +2443,8 @@ void Statistics::printPhaseResultsToStringVec(const PhaseResults& phaseResults,
 
 	// failed operations per error kind
 
-	printPhaseResultsErrorsToStringVec(phaseResults.errorCounts, outLabelsVec, outResultsVec);
+	printPhaseResultsErrorsToStringVec(phaseResults.errorCounts, phaseResults.retryCounts,
+		phaseResults.retryWaitMillis, outLabelsVec, outResultsVec);
 
 	// elbencho version
 
@@ -2570,12 +2602,13 @@ void Statistics::printPhaseResultsLatencyToStringVec(const LatencyHistogram& lat
 }
 
 /**
- * Print error counts to StringVec, e.g. for the StringVec to be turned into CSV.
+ * Print error and retry counts to StringVec, e.g. for the StringVec to be turned into CSV.
  *
- * This can be called with empty errorCounts if caller is only interested in outLabelsVec. All
- * values are empty if no error occurred in the phase.
+ * This can be called with empty errorCounts/retryCounts if caller is only interested in
+ * outLabelsVec. All values are empty if no error/retry occurred in the phase.
  */
 void Statistics::printPhaseResultsErrorsToStringVec(const ErrorCounts& errorCounts,
+	const ErrorCounts& retryCounts, uint64_t retryWaitMillis,
 	StringVec& outLabelsVec, StringVec& outResultsVec)
 {
 	const uint64_t numErrorsTotal = errorCounts.getNumErrorsTotal();
@@ -2605,6 +2638,19 @@ void Statistics::printPhaseResultsErrorsToStringVec(const ErrorCounts& errorCoun
 
 	outLabelsVec.push_back("errors by kind");
 	outResultsVec.push_back(!numErrorsTotal ? "" : errorCounts.getKindsStr(";", "=") );
+
+	// retried request attempts (e.g. because of S3 throttling) and their backoff wait
+
+	const uint64_t numRetriesTotal = retryCounts.getNumErrorsTotal();
+
+	outLabelsVec.push_back("retries total");
+	outResultsVec.push_back(!numRetriesTotal ? "" : std::to_string(numRetriesTotal) );
+
+	outLabelsVec.push_back("retries wait ms");
+	outResultsVec.push_back(!numRetriesTotal ? "" : std::to_string(retryWaitMillis) );
+
+	outLabelsVec.push_back("retries by kind");
+	outResultsVec.push_back(!numRetriesTotal ? "" : retryCounts.getKindsStr(";", "=") );
 }
 
 void Statistics::printPhaseResultsAsJSON(const PhaseResults& phaseResults)
@@ -2885,6 +2931,13 @@ void Statistics::printPhaseResultsAsJSON(const PhaseResults& phaseResults)
     if(phaseResults.errorCounts.getNumErrorsTotal() )
         phaseResults.errorCounts.getAsPropertyTreeForJSONFile(lastDoneSubtree, "errors");
 
+    // request attempts that the S3 client retried per error kind, plus their backoff wait; no
+    // "first_done.retries" because retries aren't tied to the stonewall snapshot
+
+    if(phaseResults.retryCounts.getNumErrorsTotal() )
+        phaseResults.retryCounts.getAsPropertyTreeForJSONFile(lastDoneSubtree, "retries",
+            phaseResults.retryWaitMillis, true);
+
 
     // copy first level subtrees into main tree
 
@@ -2935,6 +2988,8 @@ void Statistics::getBenchResultAsPropertyTreeForService(bpt::ptree& outTree)
 	LatencyHistogram entriesLatHistoReadMix; // sum of all histograms
 	ErrorCounts errorCounts; // sum of all workers
 	uint64_t stoneWallNumErrors = 0; // sum of all workers' errors when stonewall was hit
+	ErrorCounts retryCounts; // sum of all workers' retried attempts per error kind
+	uint64_t retryWaitMillis = 0; // sum of all workers' backoff delays before those retries
 
 	getLiveOps(liveOps, liveOpsReadMix, liveLatency);
 
@@ -2976,6 +3031,8 @@ void Statistics::getBenchResultAsPropertyTreeForService(bpt::ptree& outTree)
 		entriesLatHisto += worker->getEntriesLatencyHistogram();
 		errorCounts += worker->getErrorCounts();
 		stoneWallNumErrors += worker->getStoneWallNumErrors();
+		retryCounts += worker->getRetryCounts().getCountsCopy();
+		retryWaitMillis += worker->getRetryCounts().getWaitMillis();
 
 		if( (workersSharedData.currentBenchPhase == BenchPhase_CREATEFILES) &&
 			(progArgs.getRWMixReadPercent() || progArgs.getNumRWMixReadThreads() ||
@@ -2986,12 +3043,24 @@ void Statistics::getBenchResultAsPropertyTreeForService(bpt::ptree& outTree)
 		}
 	}
 
+#ifdef S3_SUPPORT
+	// the shared client's ("--s3single") retry strategy counts into one process-wide instance
+	// instead of into a per-worker one, so it's not covered by the loop above
+	if(progArgs.getUseS3ClientSingleton() )
+	{
+		retryCounts += progArgs.getS3RetryCountsSingleton().getCountsCopy();
+		retryWaitMillis += progArgs.getS3RetryCountsSingleton().getWaitMillis();
+	}
+#endif // S3_SUPPORT
+
 	outTree.put(XFER_STATS_TRIGGERSTONEWALL, triggerStonewall);
 
 	iopsLatHisto.getAsPropertyTreeForService(outTree, XFER_STATS_LAT_PREFIX_IOPS);
 	entriesLatHisto.getAsPropertyTreeForService(outTree, XFER_STATS_LAT_PREFIX_ENTRIES);
 	errorCounts.getAsPropertyTreeForService(outTree);
 	outTree.put(XFER_STATS_ERRCOUNT_STONEWALL, stoneWallNumErrors);
+	retryCounts.getAsPropertyTreeForService(outTree, XFER_STATS_RETRYCOUNTLIST_ITEM);
+	outTree.put(XFER_STATS_RETRYWAITMILLIS, retryWaitMillis);
 
 	if( (workersSharedData.currentBenchPhase == BenchPhase_CREATEFILES) &&
 		(progArgs.getRWMixReadPercent() || progArgs.getNumRWMixReadThreads() ||

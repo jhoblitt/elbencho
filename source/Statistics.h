@@ -49,6 +49,9 @@ class PhaseResults
 
 		ErrorCounts errorCounts; // sum of failed ops per error kind of all workers
 		uint64_t stoneWallNumErrors; // failed ops of all workers when stonewall was hit
+
+		ErrorCounts retryCounts; // sum of retried attempts per error kind of all workers
+		uint64_t retryWaitMillis; // sum of backoff delays before those retries of all workers
 };
 
 /**
@@ -159,6 +162,7 @@ class Statistics
 		void printPhaseResultsLatencyToStringVec(const LatencyHistogram& latHisto,
 			std::string latTypeStr, StringVec& outLabelsVec, StringVec& outResultsVec);
 		void printPhaseResultsErrorsToStringVec(const ErrorCounts& errorCounts,
+			const ErrorCounts& retryCounts, uint64_t retryWaitMillis,
 			StringVec& outLabelsVec, StringVec& outResultsVec);
 		void printPhaseResultsAsJSON(const PhaseResults& phaseResults);
 

@@ -18,7 +18,8 @@
 * Added new `elbencho-prof.sh` tool for profile-driven automatic file & object bandwidth, IOPS, latency tests. (See `tools/elbencho-prof/`)
 * Failed S3 operations are now counted per phase and reported in the phase results on the console and in the csv and json result files. Together with `--s3ignoreerrors` this shows how much of the offered load a server rejected, e.g. with 503 or 429 when it is saturated.
   * Counts are broken down by kind (HTTP status code, timeout, connection failure/reset, unmapped libcurl error) in the console, csv and json results.
-  * Requires `--s3ignoreerrors` for the phase to complete instead of aborting on the first failure, and `AWS_RETRY_MODE=standard`/`AWS_MAX_ATTEMPTS=1` in the environment to see every failed request instead of only the ones the AWS SDK gives up retrying.
+  * Requires `--s3ignoreerrors` for the phase to complete instead of aborting on the first failure.
+  * Request attempts that the AWS SDK retries on its own, and the backoff wait before those retries, are now counted separately per phase as `retries` (console, csv and json results), so the SDK's retries no longer need to be disabled with `AWS_RETRY_MODE=standard`/`AWS_MAX_ATTEMPTS=1` to see throttling; that combination is still available to count every failed request as an error instead.
   * `--s3ignoreerrors` now also covers `--stat` and no longer continues a multipart upload after a failure.
   * User guide available at [`docs/s3-error-counts.md`](docs/s3-error-counts.md).
 * New option `--s3reqtimeout` to set the timeout for a single S3 request in milliseconds. (Default: 300000, as before)

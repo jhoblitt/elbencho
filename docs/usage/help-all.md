@@ -406,12 +406,12 @@ All options in alphabetical order:
                           (never)", "--s3nocompress".
   --s3ignoreerrors        Ignore S3 upload, download and stat errors and count 
                           them instead. Useful for stress-testing. The counts 
-                          are reported per phase in the results. Note that the 
-                          AWS SDK retries failed requests before elbencho sees 
-                          a failure, so set AWS_RETRY_MODE=standard and 
+                          are reported per phase in the results. Attempts that 
+                          the AWS SDK retries are counted separately as 
+                          retries; set AWS_RETRY_MODE=standard and 
                           AWS_MAX_ATTEMPTS=1 in the environment to count every 
-                          failed request. The exit code is 0 even if all 
-                          requests failed.
+                          failed request as an error instead. The exit code is 
+                          0 even if all requests failed.
   --s3key arg             S3 access key. (This can also be set via the 
                           AWS_ACCESS_KEY_ID env variable.)
   --s3listobj arg         List objects. The given number is the maximum number 

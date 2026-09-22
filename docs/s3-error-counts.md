@@ -13,7 +13,7 @@ elbencho --s3endpoints http://S3SERVER --s3key S3KEY --s3secret S3SECRET \
     -w -t 16 -n 1 -N 1000 -s 1M -b 1M --s3ignoreerrors s3://mybucket
 ```
 
-The AWS SDK retries a failed request on its own before elbencho ever sees it as an error, which hides most of what a saturated server is doing. To count every failed request instead of a fraction of them, disable SDK-side retries in the environment of the elbencho process:
+By default, a retryable failure is retried before elbencho ever sees it as an error: 503 and the other throttle codes the AWS SDK's own error mapper recognizes are retried by the SDK itself, while 429 and the other retryable HTTP statuses the SDK otherwise leaves non-retryable are retried because elbencho's own retry-strategy decorator marks them retryable first (see "Retried Attempts" below for the mechanism). Either way, that is no longer hidden: `retries` in the results counts those attempts and the backoff wait before them, so you can see a saturated server pushing back without giving up any of these retries. If you would rather have every failed request counted as an `errors` entry immediately instead, disable retries in the environment of the elbencho process:
 
 ```bash
 export AWS_RETRY_MODE=standard
@@ -38,7 +38,13 @@ In distributed mode, a `Svc errors` row follows it, breaking the same total down
 Svc errors       : [ node001=8 node002=0 ]
 ```
 
-The csv results file gets seven additional columns, always present but only filled in for a phase that had at least one counted failure:
+A `Retries` row follows for any phase with at least one retried attempt (see "Retried Attempts" below); there is no per-service breakdown for it:
+
+```
+Retries          : [ total=8 wait_ms=712 http_429=8 ]
+```
+
+The csv results file gets ten additional columns, always present but only filled in for a phase that had at least one counted failure or retry: seven for errors as before, plus `retries total`, `retries wait ms` and `retries by kind`.
 
 * `errors total` - all counted failures
 * `errors timeout` - failures where no response arrived before elbencho gave up (see `--s3reqtimeout`)
@@ -47,6 +53,9 @@ The csv results file gets seven additional columns, always present but only fill
 * `errors http 4xx` - failures with a 4xx HTTP status
 * `errors http 5xx` - failures with a 5xx HTTP status
 * `errors by kind` - every kind that occurred with its count, separated by semicolons, e.g. `http_503=40;timeout=2`
+* `retries total` - all request attempts that the AWS SDK retried
+* `retries wait ms` - sum of the backoff delay the AWS SDK waited before each retry, added up over every attempt and every worker thread
+* `retries by kind` - every kind of the retried attempts with its count, separated by semicolons, using the same kinds as `errors by kind`
 
 The json results file adds `errors.total` to `first_done` (the count when the fastest worker hit stonewall, only present if it is non-zero) and a fuller `errors` subtree to `last_done`, with a `total` and a `by_kind` breakdown. In distributed runs each service instance takes that snapshot when its own first thread finishes, whereas the other `first_done` counters come from the master's poll at the moment the first service reported, so the two can differ slightly under host skew and rates should use `last_done`. This is a real run against a bucket that does not exist, with `--s3ignoreerrors`, pretty-printed with `jq` (the json result file itself has one such object per line, one line per phase):
 
@@ -102,7 +111,7 @@ The json results file adds `errors.total` to `first_done` (the count when the fa
 }
 ```
 
-`tools/elbencho-summarize-json --show-errors` adds `Errors` and `Err%` columns to its summary and details tables, computed from `last_done.errors.total` and `last_done.ios`. In the summary table, which groups multiple runs, `Errors`/`Err%` are a pooled rate for the group (sum of `errors.total` over sum of `ios`), not an average of the individual runs' rates.
+`tools/elbencho-summarize-json --show-errors` adds `Errors`, `Err%` and `Retries` columns to its summary and details tables, computed from `last_done.errors.total`, `last_done.ios` and `last_done.retries.total`. In the summary table, which groups multiple runs, `Errors`/`Err%` are a pooled rate for the group (sum of `errors.total` over sum of `ios`), not an average of the individual runs' rates; `Retries` is likewise a sum across the group.
 
 ## **Error Kinds**
 
@@ -115,16 +124,90 @@ The json results file adds `errors.total` to `first_done` (the count when the fa
 | `curl_<n>` | A libcurl error code without a more specific mapping above |
 | `other` | A failure with none of the above (a build without S3_AWSCRT uses libcurl and always resolves to one of the kinds above or `curl_<n>`; a build with S3_AWSCRT matches known AWS CRT error names in the error message and falls back to `other` for anything else) |
 
+## **Retried Attempts**
+
+Independently of `--s3ignoreerrors`, elbencho counts request attempts that get retried before handing the outcome back to elbencho. 503 and the other throttle codes the AWS SDK's own error mapper recognizes are retried by the SDK itself; 429 (`TooManyRequests`) and the other retryable HTTP statuses the SDK otherwise leaves non-retryable are retried because elbencho's own retry-strategy decorator marks them retryable before handing them to the SDK's retry strategy. Either way the retry happens before elbencho's worker sees an outcome, and the SDK's default retry mode retries up to ten times with exponential backoff without any special configuration. This makes throttling invisible to `--s3ignoreerrors`'s `errors` unless every retry is also exhausted, which is why `retries` exists as a separate counter.
+
+`retries total` is the number of attempts the SDK retried, broken down by error kind in `retries by kind` using the same kinds as `errors by kind` (see "Error Kinds" above). `retries wait ms` is the sum of the backoff delay the SDK computed before each of those retries, added up over every attempt and every worker thread; because worker threads retry concurrently, this is an upper bound on how long retrying held up the phase, not the actual wall-clock time spent waiting. In the SDK's default retry mode the first retry of a request happens without a delay, so `wait_ms` stays 0 for requests that were retried only once. Two other SDK waits are not part of `wait_ms`: the token-bucket wait `AWS_RETRY_MODE=adaptive` makes before sending a request, and a retry the SDK makes to correct the region (only with region `aws-global`). A delay the SDK computed but then skipped, e.g. after a clock-skew correction, is still counted as waited.
+
+This gives two ways to run a throttling stress test:
+* Leave the SDK's retry behavior in place and read `retries`: every eventually-successful request still completes, `retries` shows how much throttling it took to get there, and only requests that exhaust the SDK's retry budget end up in `errors`.
+* Set `AWS_RETRY_MODE=standard` and `AWS_MAX_ATTEMPTS=1` in the environment (see "How To Run" above) so every failed request becomes an `errors` entry immediately instead of being retried; `retries` then stays at 0. Note that `AWS_MAX_ATTEMPTS` only takes effect together with `AWS_RETRY_MODE=standard` or `AWS_RETRY_MODE=adaptive` — it has no effect with the SDK's legacy default retry mode.
+
+Counting both together gives the total number of physical request attempts and how many of them failed, for a data phase (WRITE, READ):
+* attempts = `last_done.ios` + `retries.total`
+* failed attempts = `errors.total` + `retries.total`
+
+(the same substitutions as in "Computing An Error Rate" below apply for metadata-only phases and read/write mixes). `retries.total` counts every retried request of the phase, including multipart create, complete and abort requests, listings and bucket operations, so this formula is exact only for phases whose requests are all data requests.
+
+There is no `first_done.retries`: the shared-client instance used by `--s3single` has no per-thread stonewall snapshot, so a first-done value could not be produced consistently for both client modes, and the monitoring use case reads `last_done` anyway.
+
+Retried attempts inside the AWS Common Runtime (`S3_AWSCRT` builds) are not covered for object data. With `S3_AWSCRT=1`, every `PutObject`, `GetObject` and `CopyObject` request goes through the CRT's own meta-request machinery and its own retry strategy, so a CRT build counts no retries of object reads or writes at all, whatever the object size. Only the SDK-level requests — multipart create, complete and abort, listings, bucket operations and `HeadObject` — pass through elbencho's retry strategy and are counted.
+
+This is a real run against a fake S3 server that answers with a `429 TooManyRequests` a fixed number of times before succeeding, with `-w -t 2 -n 1 -N 2 -s 4k -b 4k` and no `AWS_RETRY_MODE`/`AWS_MAX_ATTEMPTS` overrides, pretty-printed with `jq` (the json result file itself has one such object per line, one line per phase):
+
+```json
+{
+  "phase_type": "WRITE",
+  "phase_id": "759819ff-8349-44e2-aea2-5484996554da",
+  "iso_start_date": "2026-09-22T21:32:28.559+0000",
+  "config": {
+    "path_type": "bucket",
+    "paths": "1",
+    "hosts": "1",
+    "threads": "2",
+    "dirs": "1",
+    "files": "2",
+    "file_size": "4096",
+    "block_size": "4096",
+    "direct_io": "false",
+    "random_offsets": "false",
+    "io_depth": "1",
+    "version": "3.1-12",
+    "command": "..."
+  },
+  "first_done": {
+    "elapsed_time_ms": "225",
+    "entries/s": "13",
+    "iops": "13",
+    "bytes/s": "199690",
+    "entries": "3",
+    "ios": "3",
+    "bytes": "45056",
+    "cpu%": "1"
+  },
+  "last_done": {
+    "elapsed_time_ms": "226",
+    "entries/s": "17",
+    "iops": "17",
+    "bytes/s": "216996",
+    "entries": "4",
+    "ios": "4",
+    "bytes": "49152",
+    "cpu%": "1",
+    "retries": {
+      "total": "8",
+      "wait_ms": "200",
+      "by_kind": {
+        "http_429": "8"
+      }
+    }
+  }
+}
+```
+
 ## **Computing An Error Rate**
 
 `errors.total / last_done.ios` is the error rate for data phases (WRITE, READ). For phases that only touch metadata (HEADOBJ, RMOBJECTS, MKBUCKETS/RMBUCKETS, the object/bucket ACL and tagging phases, LISTOBJ) use `errors.total / last_done.entries` instead, since those phases have no `ios` key. For a read/write mix (`--rwmixpct`/`--rwmixthr`), add the read-side ios: `errors.total / (last_done.ios + last_done.rwmix_read.ios)`.
 
 For multipart uploads, a failed multipart create or complete request is counted as an error but not as an IO, so `errors.total` divided by `ios` slightly overstates the error rate and is exact only for the individual part uploads. A phase where every multipart create request failed has a non-zero `errors.total` but no `ios` key at all, since not a single part was ever attempted.
 
+This is the error rate among logical operations. See "Retried Attempts" above for the corresponding rate among physical request attempts, which also counts the attempts the SDK retried before a logical operation finally succeeded or failed.
+
 ## **What The Numbers Do Not Mean**
 
 * `entries`, `ios`, `bytes` and the derived throughput/IOPS numbers are offered load, not delivered load: they include failed operations exactly like successful ones (see "Computing An Error Rate" above for the one exception, multipart create/complete).
-* With the AWS SDK's default retry behavior, a request that failed and was then retried successfully is invisible to elbencho: no error is counted, and the bytes of every attempt, not just the successful one, are counted towards `bytes`/`bytes/s`. Set `AWS_RETRY_MODE=standard` and `AWS_MAX_ATTEMPTS=1` (see "How To Run" above) to avoid this.
+* With the AWS SDK's default retry behavior, a request that failed and was then retried successfully is counted in `retries` (see "Retried Attempts" above), not in `errors`, and the bytes of every attempt, not just the successful one, are counted towards `bytes`/`bytes/s`. Set `AWS_RETRY_MODE=standard` and `AWS_MAX_ATTEMPTS=1` (see "How To Run" above) to have it counted as an error instead.
 * Latency (`--lat`) includes failed operations along with successful ones.
 * Operations still in flight when `--timelimit` fires are not counted at all, neither as an IO nor as an error. At most threads × iodepth operations can be in flight at once, so this is a small, bounded blind spot.
 * The exit code stays 0 even if every single request failed, since that is the point of `--s3ignoreerrors`: check the error counts in the results, not the exit code.

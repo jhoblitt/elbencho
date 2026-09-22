@@ -302,6 +302,11 @@ void WorkerManager::startNextPhase(BenchPhase newBenchPhase, std::string* benchI
 	for(size_t i=0; i < workerVec.size(); i++)
 		workerVec[i]->resetStats();
 
+#ifdef S3_SUPPORT
+	// per-worker resetStats() above doesn't reach the shared client's retry counts ("--s3single")
+	if(progArgs.getUseS3ClientSingleton() )
+		progArgs.getS3RetryCountsSingleton().reset();
+#endif // S3_SUPPORT
 
 	if(benchID)
 	{

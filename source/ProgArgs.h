@@ -11,6 +11,7 @@
 
 #include "Common.h"
 #include "CuFileHandleData.h"
+#include "ErrorCounts.h"
 #include "Logger.h"
 #include "PathStore.h"
 #include "toolkits/BlockSizeMix.h"
@@ -381,6 +382,7 @@ class ProgArgs
 
 #ifdef S3_SUPPORT
         std::shared_ptr<S3Client> s3ClientSingleton; // shared singleton s3 client for workers
+        mutable RetryCounts s3RetryCountsSingleton; // retried attempts of the shared s3 client
         std::atomic_bool s3IsInterruptionRequested{false}; // interrupt for s3 singleton lambdas
         std::string s3SingletonEndpointStr; // endpoint string for singleton s3 client
         StringVec s3MpuSharingUploadIDs; // ProgArgs precreated MPU IDs for mpu sharing mode
@@ -686,6 +688,7 @@ class ProgArgs
         // methods related to shared s3 client singleton for workers
 #ifdef S3_SUPPORT
         std::shared_ptr<S3Client> getS3ClientSingleton() const { return s3ClientSingleton; }
+        RetryCounts& getS3RetryCountsSingleton() const { return s3RetryCountsSingleton; }
         void setS3InterruptionRequested() { s3IsInterruptionRequested = true; }
         std::string getS3SingletonEndpointStr() const { return s3SingletonEndpointStr; }
 #else // !S3_SUPPORT

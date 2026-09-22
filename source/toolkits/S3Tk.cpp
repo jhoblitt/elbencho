@@ -1,10 +1,7 @@
 // SPDX-FileCopyrightText: 2020-2025 Sven Breuner and elbencho contributors
 // SPDX-License-Identifier: GPL-3.0-only
 
-#include <cstdlib>
-
 #include "Common.h"
-#include "ErrorCounts.h"
 #include "Logger.h"
 #include "OpsLogger.h"
 #include "ProgArgs.h"
@@ -27,6 +24,7 @@
         #include <aws/core/utils/logging/CRTLogSystem.h>
     #endif
 
+    #include "toolkits/S3ErrorKind.h"
     #include "toolkits/S3InterruptibleRetryStrategy.h"
     #include "toolkits/S3UnbufferedLogSystem.h"
 
@@ -153,77 +151,12 @@ void S3Tk::uninitS3Global(const ProgArgs* progArgs)
 #ifdef S3_SUPPORT
 
 /**
- * Map a failed S3 outcome to an error kind string for ErrorCounts.
- *
- * A received http status is the answer of the server and thus always wins ("http_<code>"). Without
- * a status, the failure happened on the client side: the AWS SDK's curl http client reports the
- * curl error code in the message as "curlCode: <n>, ..." and its CRT client reports the CRT error
- * name in the message, e.g. "(aws-c-io: AWS_IO_SOCKET_TIMEOUT)". The CRT names are matched on a
- * best-effort basis. A connection failure ("conn_fail") means no connection could be established;
- * a connection reset ("conn_reset") means the connection broke before or during the response. An
- * unmapped curl error code is reported as "curl_<n>" instead of falling back to "other".
+ * Map a failed S3 outcome to an error kind string for ErrorCounts. See s3ErrorToKindStr() for the
+ * classification rules.
  */
 std::string S3Tk::errorToKindStr(const S3ErrorType& s3Error)
 {
-    const int responseCode = (int)s3Error.GetResponseCode();
-
-    if(responseCode >= 300)
-        return ERRORCOUNTS_KIND_HTTP_PREFIX + std::to_string(responseCode);
-
-    if(s3Error.GetErrorType() == S3Errors::REQUEST_TIMEOUT)
-        return ERRORCOUNTS_KIND_TIMEOUT; // (CRT client maps its request timeout to this type)
-
-    const std::string message(s3Error.GetMessage().c_str() );
-    const std::string curlPrefix = "curlCode: ";
-
-    if(StringTk::checkForPrefix(message, curlPrefix) )
-    {
-        const long curlCode = strtol(message.c_str() + curlPrefix.length(), NULL, 10);
-
-        switch(curlCode)
-        {
-            case 28: // CURLE_OPERATION_TIMEDOUT (also for connect timeouts)
-                return ERRORCOUNTS_KIND_TIMEOUT;
-            case 5: // CURLE_COULDNT_RESOLVE_PROXY
-            case 6: // CURLE_COULDNT_RESOLVE_HOST
-            case 7: // CURLE_COULDNT_CONNECT
-            case 35: // CURLE_SSL_CONNECT_ERROR
-                return ERRORCOUNTS_KIND_CONNFAIL;
-            case 18: // CURLE_PARTIAL_FILE
-            case 52: // CURLE_GOT_NOTHING
-            case 55: // CURLE_SEND_ERROR
-            case 56: // CURLE_RECV_ERROR
-                return ERRORCOUNTS_KIND_CONNRESET;
-            default:
-                return ERRORCOUNTS_KIND_CURL_PREFIX + std::to_string(curlCode);
-        }
-    }
-
-    // (CRT client: error names in the message, e.g. "(aws-c-io: AWS_IO_SOCKET_TIMEOUT)")
-
-    if(message.find("TIMEOUT") != std::string::npos)
-        return ERRORCOUNTS_KIND_TIMEOUT;
-
-    for(const char* connFailName : {"CONNECTION_REFUSED", "NO_ROUTE_TO_HOST", "NETWORK_DOWN",
-        "DNS_", "CONNECT_ABORTED", "NEGOTIATION_FAILURE"} )
-    {
-        if(message.find(connFailName) != std::string::npos)
-            return ERRORCOUNTS_KIND_CONNFAIL;
-    }
-
-    for(const char* connResetName : {"SOCKET_CLOSED", "CONNECTION_CLOSED", "BROKEN_PIPE",
-        "SOCKET_NOT_CONNECTED"} )
-    {
-        if(message.find(connResetName) != std::string::npos)
-            return ERRORCOUNTS_KIND_CONNRESET;
-    }
-
-    // remaining transport failures without curl/CRT details, e.g. the SDK's own content-length
-    // mismatch check, mean the connection broke before the response was complete
-    if(s3Error.GetErrorType() == S3Errors::NETWORK_CONNECTION)
-        return ERRORCOUNTS_KIND_CONNRESET;
-
-    return ERRORCOUNTS_KIND_OTHER;
+    return s3ErrorToKindStr(s3Error);
 }
 
 /**
@@ -240,9 +173,12 @@ std::string S3Tk::errorToKindStr(const S3ErrorType& s3Error)
  * * @isInterruptionRequested will be given to S3 retry strategy object to stop retries if
  *     interruption was requested; can be NULL.
  * @outS3EndpointStr will be set to the selected s3 endpoint from progArgs vec; can be NULL.
+ * @retryCounts will be given to the S3 retry strategy object to count retried attempts; can be
+ *     NULL.
  */
 std::shared_ptr<S3Client> S3Tk::initS3Client(const ProgArgs* progArgs,
-    size_t workerRank, std::atomic_bool* isInterruptionRequested, std::string* outS3EndpointStr)
+    size_t workerRank, std::atomic_bool* isInterruptionRequested, std::string* outS3EndpointStr,
+    RetryCounts* retryCounts)
 {
     S3ClientConfiguration config;
 
@@ -270,7 +206,7 @@ std::shared_ptr<S3Client> S3Tk::initS3Client(const ProgArgs* progArgs,
         ignored by S3CrtClient, which uses throughputTargetGbps for implicit calculation */
     config.retryStrategy = std::make_shared<S3InterruptibleRetryStrategy>(
         Aws::Client::InitRetryStrategy(),
-        isInterruptionRequested); /* S3CrtClient uses this for SDK-level ops (e.g.
+        isInterruptionRequested, retryCounts); /* S3CrtClient uses this for SDK-level ops (e.g.
         CreateMultipartUpload); CRT-internal Put/Get retries are separate */
     config.connectTimeoutMs = 5000;
     config.requestTimeoutMs = progArgs->getS3RequestTimeoutMs(); /* curl: low speed abort time;

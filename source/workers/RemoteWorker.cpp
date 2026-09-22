@@ -243,6 +243,12 @@ void RemoteWorker::finishPhase(bool allowExceptionThrow)
 		errorCounts.setFromPropertyTreeForService(resultTree);
 		stoneWallNumErrors = resultTree.get<uint64_t>(XFER_STATS_ERRCOUNT_STONEWALL, 0);
 
+		// a missing retry list means the service instance had no retries in this phase
+		ErrorCounts parsedRetryCounts;
+		parsedRetryCounts.setFromPropertyTreeForService(resultTree, XFER_STATS_RETRYCOUNTLIST);
+		retryCounts.set(parsedRetryCounts,
+			resultTree.get<uint64_t>(XFER_STATS_RETRYWAITMILLIS, 0) );
+
 		liveLatency.setToZero(); // this service is done, so no more latency
 
 		if( (workersSharedData->currentBenchPhase == BenchPhase_CREATEFILES) &&

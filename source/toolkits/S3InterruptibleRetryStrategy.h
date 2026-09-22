@@ -12,20 +12,26 @@
 #include <aws/core/client/RetryStrategy.h>
 #include <aws/core/http/HttpResponse.h>
 
+#include "ErrorCounts.h"
+#include "toolkits/S3ErrorKind.h"
+
 /**
  * A decorator around any Aws::Client::RetryStrategy that checks the interrupt flag before
  * delegating ShouldRetry. It also remaps HTTP statuses and throttle exception names that the AWS
  * SDK leaves as non-retryable (notably 429 with Code "TooManyRequests") so the wrapped strategy
  * can apply its normal attempt limit, quota, and backoff. The base strategy is typically created
- * by Aws::Client::InitRetryStrategy(), which honors AWS_RETRY_MODE and AWS_MAX_ATTEMPTS.
+ * by Aws::Client::InitRetryStrategy(), which honors AWS_RETRY_MODE and AWS_MAX_ATTEMPTS. If given
+ * a retryCounts, it also counts retried attempts and their backoff delay per error kind; CRT-
+ * internal retries (see S3Tk::initS3Client()) are not visible here and thus not counted.
  */
 class S3InterruptibleRetryStrategy : public Aws::Client::RetryStrategy
 {
     public:
         S3InterruptibleRetryStrategy(std::shared_ptr<Aws::Client::RetryStrategy> baseStrategy,
-            std::atomic_bool *isInterruptionRequestedPtr)
+            std::atomic_bool *isInterruptionRequestedPtr, RetryCounts *retryCounts = NULL)
             : baseStrategy(std::move(baseStrategy) ),
-              isInterruptionRequestedPtr(isInterruptionRequestedPtr)
+              isInterruptionRequestedPtr(isInterruptionRequestedPtr),
+              retryCounts(retryCounts)
         {
         }
 
@@ -35,15 +41,30 @@ class S3InterruptibleRetryStrategy : public Aws::Client::RetryStrategy
             if(isInterruptionRequestedPtr && isInterruptionRequestedPtr->load() )
                 return false;
 
-            return baseStrategy->ShouldRetry(asRetryableIfNeeded(error), attemptedRetries);
+            const bool retry = baseStrategy->ShouldRetry(asRetryableIfNeeded(error),
+                attemptedRetries);
+
+            // the SDK always calls CalculateDelayBeforeNextRetry() right before ShouldRetry() for
+            // the same attempt, on this same thread, so lastDelayMillis() is still that delay
+            if(retry && retryCounts)
+            {
+                const long delay = lastDelayMillis();
+                retryCounts->addRetry(s3ErrorToKindStr(error), (delay > 0) ? delay : 0);
+            }
+
+            return retry;
         }
 
         long CalculateDelayBeforeNextRetry(
             const Aws::Client::AWSError<Aws::Client::CoreErrors> &error,
             long attemptedRetries) const override
         {
-            return baseStrategy->CalculateDelayBeforeNextRetry(
+            const long delay = baseStrategy->CalculateDelayBeforeNextRetry(
                 asRetryableIfNeeded(error), attemptedRetries);
+
+            lastDelayMillis() = delay;
+
+            return delay;
         }
 
         long GetMaxAttempts() const override
@@ -163,8 +184,21 @@ class S3InterruptibleRetryStrategy : public Aws::Client::RetryStrategy
             return remapped;
         }
 
+        /**
+         * Delay CalculateDelayBeforeNextRetry() computed for the retry ShouldRetry() is about to
+         * decide on, on this same thread. thread_local because both hooks run on the thread
+         * executing the request, but different requests run on different threads concurrently.
+         */
+        static long& lastDelayMillis()
+        {
+            static thread_local long lastDelayMillis = 0;
+
+            return lastDelayMillis;
+        }
+
         std::shared_ptr<Aws::Client::RetryStrategy> baseStrategy;
         std::atomic_bool *isInterruptionRequestedPtr; // can be NULL
+        RetryCounts *retryCounts; // counts retried attempts; can be NULL
 };
 
 #endif // S3_SUPPORT
