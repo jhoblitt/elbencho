@@ -186,7 +186,7 @@ void S3Mode::init()
     else
     { // using per-worker s3 client instances
         s3Client = S3Tk::initS3Client(progArgs, workerRank, &worker.isInterruptionRequested,
-            &s3EndpointStr);
+            &s3EndpointStr, &worker.retryCounts);
     }
 
     useS3SSE = s3Args.getUseS3SSE();

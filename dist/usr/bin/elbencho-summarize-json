@@ -29,7 +29,7 @@ usage() {
   printf "  %-22s %s\n" "--show-entries" "Show Entries/s columns."
   printf "  %-22s %s\n" "--show-latency-io" "Show I/O latency columns."
   printf "  %-22s %s\n" "--show-latency-entries" "Show Entries latency columns."
-  printf "  %-22s %s\n" "--show-errors" "Show per-phase error count and error rate."
+  printf "  %-22s %s\n" "--show-errors" "Show per-phase error count, error rate and retry count."
   printf "  %-22s %s\n" "--show-minmax" "Show Min/Max columns for all visible metrics."
   printf "  %-22s %s\n" "--hide-throughput" "Hide Throughput columns."
   printf "  %-22s %s\n" "--hide-iops" "Hide IOPS columns."
@@ -108,9 +108,9 @@ JQ_SUMMARY_PROGRAM='
   def human_readable_base10_bytes: . as $bytes | if $bytes < 1000 then "\($bytes | round) B/s" elif $bytes < 1000000 then "\($bytes / 1000 | round2) kB/s" elif $bytes < 1000000000 then "\($bytes / 1000000 | round2) MB/s" elif $bytes < 1000000000000 then "\($bytes / 1000000000 | round2) GB/s" else "\($bytes / 1000000000000 | round2) TB/s" end;
   def human_readable_base10_prefix: . as $val | if $val < 1000 then "\($val | round)" elif $val < 1000000 then "\($val / 1000 | round2) k" elif $val < 1000000000 then "\($val / 1000000 | round2) M" elif $val < 1000000000000 then "\($val / 1000000000 | round2) G" else "\($val / 1000000000000 | round2) T" end;
 
-  # errors total sums as a plain count across the group, and its error rate
-  def format_errors(sum_errors; sum_ios):
-      [(sum_errors | tostring), (if sum_ios > 0 then (sum_errors * 100 / sum_ios | round1 | tostring) else "-" end)];
+  # errors total sums as a plain count across the group, its error rate, and the retries total
+  def format_errors(sum_errors; sum_ios; sum_retries):
+      [(sum_errors | tostring), (if sum_ios > 0 then (sum_errors * 100 / sum_ios | round1 | tostring) else "-" end), (sum_retries | tostring)];
 
   def format_metric(min; max; avg; base; unit):
       def format_value(val):
@@ -153,6 +153,7 @@ JQ_SUMMARY_PROGRAM='
         ($group | map(.last_done?.latency?.entries?.avg_us? | if . == null then 0 else tonumber end)) as $lat_ent_avg |
         ($group | map(.last_done.errors.total? | if . == null then 0 else tonumber end)) as $errors_total |
         ($group | map(.last_done.ios? | if . == null then 0 else tonumber end)) as $errors_ios |
+        ($group | map(.last_done.retries.total? | if . == null then 0 else tonumber end)) as $retries_total |
         {
           phase: $group[0].phase_type, configs: $configs,
           min_first_bytes: ($first_bytes | min), max_first_bytes: ($first_bytes | max), avg_first_bytes: ($first_bytes | add / length),
@@ -167,7 +168,8 @@ JQ_SUMMARY_PROGRAM='
           min_last_time: ($last_time | min), max_last_time: ($last_time | max), avg_last_time: ($last_time | add / length),
           min_lat_io: ($lat_io_min | min), max_lat_io: ($lat_io_max | max), avg_lat_io: ($lat_io_avg | add / length),
           min_lat_ent: ($lat_ent_min | min), max_lat_ent: ($lat_ent_max | max), avg_lat_ent: ($lat_ent_avg | add / length),
-          sum_errors_total: ($errors_total | add), sum_errors_ios: ($errors_ios | add)
+          sum_errors_total: ($errors_total | add), sum_errors_ios: ($errors_ios | add),
+          sum_retries_total: ($retries_total | add)
         }
       )
   ) as $summary_data |
@@ -183,7 +185,7 @@ JQ_SUMMARY_PROGRAM='
     (if $show_time then format_metric(.min_first_time; .max_first_time; .avg_first_time; "time"; "") + format_metric(.min_last_time; .max_last_time; .avg_last_time; "time"; "") else [] end) +
     (if $show_latency_io then format_metric(.min_lat_io; .max_lat_io; .avg_lat_io; "latency"; "") else [] end) +
     (if $show_latency_entries then format_metric(.min_lat_ent; .max_lat_ent; .avg_lat_ent; "latency"; "") else [] end) +
-    (if $show_errors then format_errors(.sum_errors_total; .sum_errors_ios) else [] end)
+    (if $show_errors then format_errors(.sum_errors_total; .sum_errors_ios; .sum_retries_total) else [] end)
   ) | @tsv
 '
 
@@ -203,7 +205,8 @@ JQ_DETAILS_FORMATTER='
   def format_errors($obj):
       ($obj.last_done.errors.total // "0") as $errs |
       ($obj.last_done.ios) as $ios |
-      [$errs, (if ($ios != null and ($ios|tonumber) > 0) then (($errs|tonumber) * 100 / ($ios|tonumber) | round1 | tostring) else "-" end)];
+      ($obj.last_done.retries.total // "0") as $retries |
+      [$errs, (if ($ios != null and ($ios|tonumber) > 0) then (($errs|tonumber) * 100 / ($ios|tonumber) | round1 | tostring) else "-" end), $retries];
 
   .[] | select(.first_done or .last_done) | . as $obj |
   (
@@ -269,7 +272,7 @@ if [ "$SHOW_DETAILS" = true ]; then
         if [ "$SHOW_MINMAX" = true ]; then header_cols_details+=("Min $lat_unit Ent" "Max $lat_unit Ent"); fi
         header_cols_details+=("Avg $lat_unit Ent")
     fi
-    if [ "$SHOW_ERRORS" = true ]; then header_cols_details+=("Errors" "Err%"); fi
+    if [ "$SHOW_ERRORS" = true ]; then header_cols_details+=("Errors" "Err%" "Retries"); fi
     if [ "$SHOW_ID" = true ]; then header_cols_details+=("ID"); fi
 
     if [[ -n "$SEPARATOR" ]]; then
@@ -331,7 +334,7 @@ fi
         if [ "$SHOW_MINMAX" = true ]; then header_cols_csv+=("Min $lat_unit Ent" "Max $lat_unit Ent"); fi
         header_cols_csv+=("Avg $lat_unit Ent")
     fi
-    if [ "$SHOW_ERRORS" = true ]; then header_cols_csv+=("Errors" "Err%"); fi
+    if [ "$SHOW_ERRORS" = true ]; then header_cols_csv+=("Errors" "Err%" "Retries"); fi
 
     (IFS="$SEPARATOR"; printf "%s\n" "${header_cols_csv[*]}")
   else
@@ -376,7 +379,7 @@ fi
         if [ "$SHOW_MINMAX" = true ]; then header_line1+=("" ""); header_line2+=("Min" "Max" "Avg"); else header_line2+=("Avg"); fi
     fi
     if [ "$SHOW_ERRORS" = true ]; then
-        header_line1+=("Errors" "Err%"); header_line2+=("" "")
+        header_line1+=("Errors" "Err%" "Retries"); header_line2+=("" "" "")
     fi
 
     (IFS=$'\t'; printf "%s\n" "${header_line1[*]}")

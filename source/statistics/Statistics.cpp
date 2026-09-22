@@ -233,8 +233,23 @@ bool Statistics::generatePhaseResults(PhaseResults& phaseResults)
 		phaseResults.entriesLatHistoReadMix += worker->getEntriesLatencyHistogramReadMix();
 		phaseResults.errorCounts += worker->getErrorCounts();
 		phaseResults.stoneWallNumErrors += worker->getStoneWallNumErrors();
+		phaseResults.retryCounts += worker->getRetryCounts().getCountsCopy();
+		phaseResults.retryWaitMillis += worker->getRetryCounts().getWaitMillis();
 
 	} // end of for loop
+
+#ifdef S3_SUPPORT
+	/* the shared client's ("--s3single") retry strategy counts into one process-wide instance
+	   instead of into a per-worker one, so it's not covered by the loop above and needs to be
+	   added once here. In service mode this is the master's own instance, which stays at zero
+	   because the master never issues S3 requests itself; the service hosts' shares already
+	   arrived summed into their RemoteWorker's retryCounts via the loop above. */
+	if(progArgs.getS3Args().getUseS3ClientSingleton() )
+	{
+		phaseResults.retryCounts += progArgs.getS3Args().getS3RetryCountsSingleton().getCountsCopy();
+		phaseResults.retryWaitMillis += progArgs.getS3Args().getS3RetryCountsSingleton().getWaitMillis();
+	}
+#endif // S3_SUPPORT
 
 	if(!firstAndLastFinishInitialized)
 	{
@@ -383,6 +398,8 @@ void Statistics::getBenchResultAsPropertyTreeForService(bpt::ptree& outTree)
 	LatencyHistogram entriesLatHistoReadMix; // sum of all histograms
 	ErrorCounts errorCounts; // sum of all workers
 	uint64_t stoneWallNumErrors = 0; // sum of all workers' errors when stonewall was hit
+	ErrorCounts retryCounts; // sum of all workers' retried attempts per error kind
+	uint64_t retryWaitMillis = 0; // sum of all workers' backoff delays before those retries
 
 	getLiveOps(liveOps, liveOpsReadMix, liveLatency);
 
@@ -424,6 +441,8 @@ void Statistics::getBenchResultAsPropertyTreeForService(bpt::ptree& outTree)
 		entriesLatHisto += worker->getEntriesLatencyHistogram();
 		errorCounts += worker->getErrorCounts();
 		stoneWallNumErrors += worker->getStoneWallNumErrors();
+		retryCounts += worker->getRetryCounts().getCountsCopy();
+		retryWaitMillis += worker->getRetryCounts().getWaitMillis();
 
 		if(progArgs.hasRWMixReadCounters(workersSharedData.currentBenchPhase) )
 		{
@@ -432,12 +451,24 @@ void Statistics::getBenchResultAsPropertyTreeForService(bpt::ptree& outTree)
 		}
 	}
 
+#ifdef S3_SUPPORT
+	// the shared client's ("--s3single") retry strategy counts into one process-wide instance
+	// instead of into a per-worker one, so it's not covered by the loop above
+	if(progArgs.getS3Args().getUseS3ClientSingleton() )
+	{
+		retryCounts += progArgs.getS3Args().getS3RetryCountsSingleton().getCountsCopy();
+		retryWaitMillis += progArgs.getS3Args().getS3RetryCountsSingleton().getWaitMillis();
+	}
+#endif // S3_SUPPORT
+
 	outTree.put(XFER_STATS_TRIGGERSTONEWALL, triggerStonewall);
 
 	iopsLatHisto.getAsPropertyTreeForService(outTree, XFER_STATS_LAT_PREFIX_IOPS);
 	entriesLatHisto.getAsPropertyTreeForService(outTree, XFER_STATS_LAT_PREFIX_ENTRIES);
 	errorCounts.getAsPropertyTreeForService(outTree);
 	outTree.put(XFER_STATS_ERRCOUNT_STONEWALL, stoneWallNumErrors);
+	retryCounts.getAsPropertyTreeForService(outTree, XFER_STATS_RETRYCOUNTLIST_ITEM);
+	outTree.put(XFER_STATS_RETRYWAITMILLIS, retryWaitMillis);
 
 	if(progArgs.hasRWMixReadCounters(workersSharedData.currentBenchPhase) )
 	{

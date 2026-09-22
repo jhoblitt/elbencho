@@ -688,6 +688,22 @@ void PhaseResultsPrinter::printPhaseResultsToStream(const PhaseResults& phaseRes
 		}
 	}
 
+	// retried request attempts (e.g. because of S3 throttling) and their backoff wait
+	if(phaseResults.retryCounts.getNumErrorsTotal() )
+	{
+		// individual results header (note: keep format in sync with general table format string)
+		outStream << boost::format(phaseResultsLeftFormatStr)
+			% ""
+			% "Retries"
+			% ":";
+
+		outStream << "[ " <<
+			"total=" << phaseResults.retryCounts.getNumErrorsTotal() << " " <<
+			"wait_ms=" << phaseResults.retryWaitMillis << " " <<
+			phaseResults.retryCounts.getKindsStr(" ", "=") <<
+			" ]" << std::endl;
+	}
+
     // graph of the throughput over time (colored lines only on a console)
     if(graphSamples && progArgs.getShowGraph() )
     {
@@ -1163,7 +1179,8 @@ void PhaseResultsPrinter::printPhaseResultsToStringVec(const PhaseResults& phase
 
 	// failed operations per error kind
 
-	printPhaseResultsErrorsToStringVec(phaseResults.errorCounts, outLabelsVec, outResultsVec);
+	printPhaseResultsErrorsToStringVec(phaseResults.errorCounts, phaseResults.retryCounts,
+		phaseResults.retryWaitMillis, outLabelsVec, outResultsVec);
 
 	// elbencho version
 
@@ -1416,12 +1433,13 @@ void PhaseResultsPrinter::printPhaseResultsLatencyToStringVec(const LatencyHisto
 }
 
 /**
- * Print error counts to StringVec, e.g. for the StringVec to be turned into CSV.
+ * Print error and retry counts to StringVec, e.g. for the StringVec to be turned into CSV.
  *
- * This can be called with empty errorCounts if caller is only interested in outLabelsVec. All
- * values are empty if no error occurred in the phase.
+ * This can be called with empty errorCounts/retryCounts if caller is only interested in
+ * outLabelsVec. All values are empty if no error/retry occurred in the phase.
  */
 void PhaseResultsPrinter::printPhaseResultsErrorsToStringVec(const ErrorCounts& errorCounts,
+	const ErrorCounts& retryCounts, uint64_t retryWaitMillis,
 	StringVec& outLabelsVec, StringVec& outResultsVec)
 {
 	const uint64_t numErrorsTotal = errorCounts.getNumErrorsTotal();
@@ -1451,6 +1469,19 @@ void PhaseResultsPrinter::printPhaseResultsErrorsToStringVec(const ErrorCounts& 
 
 	outLabelsVec.push_back("errors by kind");
 	outResultsVec.push_back(!numErrorsTotal ? "" : errorCounts.getKindsStr(";", "=") );
+
+	// retried request attempts (e.g. because of S3 throttling) and their backoff wait
+
+	const uint64_t numRetriesTotal = retryCounts.getNumErrorsTotal();
+
+	outLabelsVec.push_back("retries total");
+	outResultsVec.push_back(!numRetriesTotal ? "" : std::to_string(numRetriesTotal) );
+
+	outLabelsVec.push_back("retries wait ms");
+	outResultsVec.push_back(!numRetriesTotal ? "" : std::to_string(retryWaitMillis) );
+
+	outLabelsVec.push_back("retries by kind");
+	outResultsVec.push_back(!numRetriesTotal ? "" : retryCounts.getKindsStr(";", "=") );
 }
 
 void PhaseResultsPrinter::printPhaseResultsAsJSON(const PhaseResults& phaseResults)
@@ -1889,6 +1920,13 @@ void PhaseResultsPrinter::printPhaseResultsAsJSON(const PhaseResults& phaseResul
 
     if(phaseResults.errorCounts.getNumErrorsTotal() )
         phaseResults.errorCounts.getAsPropertyTreeForJSONFile(lastDoneSubtree, "errors");
+
+    // request attempts that the S3 client retried per error kind, plus their backoff wait; no
+    // "first_done.retries" because retries aren't tied to the stonewall snapshot
+
+    if(phaseResults.retryCounts.getNumErrorsTotal() )
+        phaseResults.retryCounts.getAsPropertyTreeForJSONFile(lastDoneSubtree, "retries",
+            phaseResults.retryWaitMillis, true);
 
 
     // copy first level subtrees into main tree

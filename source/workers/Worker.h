@@ -63,6 +63,7 @@ class Worker
 		LatencyHistogram entriesLatHisto; // entry latency histogram (valid only at phase end)
 		LatencyHistogram entriesLatHistoReadMix; // entry lat histogram (valid only at phase end)
 		ErrorCounts errorCounts; // failed ops per error kind (valid only at phase end)
+		RetryCounts retryCounts; // retried attempts of this worker's s3 client (valid at phase end)
         LiveWorkerStats liveStats; // for the latest live stats interval, see updateLiveStats()
 
 		virtual void run() = 0;
@@ -97,6 +98,8 @@ class Worker
 			{ return errorCounts; }
 		uint64_t getStoneWallNumErrors() const
 			{ return stoneWallNumErrors; }
+		const RetryCounts& getRetryCounts() const
+			{ return retryCounts; }
 
 		virtual void resetStats()
 		{
@@ -119,6 +122,7 @@ class Worker
 			entriesLatHistoReadMix.reset();
             liveStats.setToZero();
 			errorCounts.reset();
+			retryCounts.reset();
 		}
 
 		/**

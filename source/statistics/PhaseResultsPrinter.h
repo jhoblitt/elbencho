@@ -68,6 +68,9 @@ class PhaseResults
 		ErrorCounts errorCounts; // sum of failed ops per error kind of all workers
 		uint64_t stoneWallNumErrors{0}; // failed ops of all workers when stonewall was hit
 
+		ErrorCounts retryCounts; // sum of retried attempts per error kind of all workers
+		uint64_t retryWaitMillis{0}; // sum of backoff delays before those retries of all workers
+
         // per-service min/avg/max by own completion time (netbench: the clients)
         ServiceMinMax svcIOPS;
         ServiceMinMax svcBytesPerSec;
@@ -119,6 +122,7 @@ class PhaseResultsPrinter
 		void printPhaseResultsLatencyToStringVec(const LatencyHistogram& latHisto,
 			std::string latTypeStr, StringVec& outLabelsVec, StringVec& outResultsVec);
 		void printPhaseResultsErrorsToStringVec(const ErrorCounts& errorCounts,
+			const ErrorCounts& retryCounts, uint64_t retryWaitMillis,
 			StringVec& outLabelsVec, StringVec& outResultsVec);
 		void printPhaseResultsAsJSON(const PhaseResults& phaseResults);
 };
