@@ -20,7 +20,7 @@ require_build_feature s3
 require_cmd python3
 
 test_init
-tap_plan 16
+tap_plan 17
 
 # The AWS SDK retries failed requests with exponential backoff by default,
 # which would make each failed operation take almost half a minute. One
@@ -177,6 +177,8 @@ assert_eq "$(opslog_count "$SYNC_OPSLOG" S3UploadPart)" "2" \
     "the operations log has 2 completed S3UploadPart entries"
 assert_eq "$(opslog_error_count "$SYNC_OPSLOG")" "1" \
     "the operations log has 1 failed entry"
+assert_eq "$(json_has_key "$ELB_JSON" WRITE last_done retries)" "false" \
+    "write phase has no \"retries\" subtree: AWS_MAX_ATTEMPTS=1 disables SDK-side retries"
 
 ################## Async multipart upload fails on the second part ##################
 

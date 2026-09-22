@@ -884,6 +884,26 @@ json_error_count()
           else .[$s].errors.by_kind[$k] end) // "0"' "$1" 2>/dev/null | head -1
 }
 
+# json_retry_count JSONFILE PHASE KIND [SECTION]
+# Number of request attempts that the AWS SDK retried, for one error kind
+# ("http_429", "http_503", ...) from the "retries" subtree's "by_kind"
+# breakdown, or one of the pseudo-kinds "total" and "wait_ms" read directly
+# from that subtree, below SECTION ("first_done" or "last_done", defaulting to
+# "last_done"). There is no "first_done.retries": a retry isn't tied to the
+# stonewall snapshot. Missing keys yield "0", because the subtree only exists
+# for phases with at least one retried attempt. Returns the first phase of
+# that name in the file.
+json_retry_count()
+{
+    local section="${4:-last_done}"
+
+    jq -r --arg p "$2" --arg k "$3" --arg s "$section" \
+        'select(.phase_type == $p) |
+         (if $k == "total" then .[$s].retries.total
+          elif $k == "wait_ms" then .[$s].retries.wait_ms
+          else .[$s].retries.by_kind[$k] end) // "0"' "$1" 2>/dev/null | head -1
+}
+
 # csv_value CSVFILE PHASE LABEL
 # Value of the column with the given header label in the row of the given
 # phase, i.e. the row whose "operation" column equals PHASE. Empty if the

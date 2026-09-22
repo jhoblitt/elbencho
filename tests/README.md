@@ -231,6 +231,11 @@ Rules to keep tests independent, fast and safe to run in parallel:
   `csv_value` read them and yield `0` respectively an empty string otherwise.
   `last_done.ios` (csv: `IOs [last]`) is the number of attempted I/O
   operations, failed ones included, i.e. the denominator of an error rate.
+  Request attempts that the AWS SDK retried on its own are reported the same
+  way below `last_done.retries` (`total`, `wait_ms` and a `by_kind`
+  breakdown), never in `first_done`; `json_retry_count` reads them, treating
+  `total` and `wait_ms` as pseudo-kinds alongside the `by_kind` breakdown, and
+  yields `0` the same way `json_error_count` does when the phase had none.
   The `tests_s3/error-counts*.t` scripts provoke failures with a missing
   bucket, wrong credentials, a closed port, a stall server and a server that
   announces a body it never fully delivers (a connection reset). The latter two
@@ -242,7 +247,12 @@ Rules to keep tests independent, fast and safe to run in parallel:
   multipart upload that fails partway through against an embedded fake S3
   server, both sync and async (`tests_s3/error-counts-multipart.t`), and
   `--stat` (HeadObject) against a missing bucket, since `--s3ignoreerrors`
-  covers that request too. `tests_posix/csv-append.t` is the companion check
+  covers that request too. `tests_s3/retry-counts.t` covers the separate
+  `retries` counters against an embedded fake S3 server that throttles with
+  429s: the SDK's default retries (per-worker and shared client), retries that
+  get exhausted into an `errors` entry, retries disabled via
+  `AWS_MAX_ATTEMPTS=1`, and the summed counts of a distributed run through two
+  elbencho service instances. `tests_posix/csv-append.t` is the companion check
   for the csv side of this: it writes two runs to the same `--csvfile` and
   confirms the second one appends instead of aborting, which is what guards
   `CSVFILE_EXPECTED_COMMAS` in `ProgArgs.cpp` against drifting out of sync with
